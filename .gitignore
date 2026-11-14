@@ -1,0 +1,41 @@
+# Secrets: never commit. Keep keys in a local .env only.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# The Vexo kit is vendored in vexo-open-kit/ (MIT, unmodified). Its local files stay out:
+vexo-open-kit/.env
+vexo-open-kit/recording.ogg
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Recordings and captured data can contain people's voices and faces
+data/*
+!data/.gitkeep
+*.ogg
+*.opus
+*.wav
+*.mp3
+*.mp4
+*.mov
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Graph cache (docs/graph/ holds the published copy)
+graphify-out/
+
+# Keep the kit's public-domain sample recording (used by the pretend band)
+!vexo-open-kit/dashboard/speech/sample-speech.opus
