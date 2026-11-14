@@ -5,6 +5,10 @@
   const feed = $("feed"), latestText = $("latest-text"), form = $("config-form");
   let events = []; // newest first
   let config = null;
+  // A hosted hub is opened as /app?k=KEY. Carry the key on every call and on links between our pages.
+  const K = new URLSearchParams(location.search).get("k");
+  const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
+  if (K) document.querySelectorAll('a[href="/"], a[href="/app"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -98,7 +102,7 @@
 
   async function loadState(first) {
     try {
-      const r = await fetch("/api/state", { cache: "no-store" });
+      const r = await fetch(withKey("/api/state"), { cache: "no-store" });
       const s = await r.json();
       const seen = new Map(events.map((e) => [e.id, e]));
       (s.events || []).forEach((e) => seen.set(e.id, e));
@@ -118,7 +122,7 @@
   }
 
   function connect() {
-    const es = new EventSource("/events");
+    const es = new EventSource(withKey("/events"));
     let opened = false;
     es.onopen = () => {
       setLive(true);
@@ -133,7 +137,7 @@
 
   async function post(url, body) {
     try {
-      const r = await fetch(url, {
+      const r = await fetch(withKey(url), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

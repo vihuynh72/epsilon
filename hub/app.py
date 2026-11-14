@@ -132,9 +132,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route("POST")
 
+    def has_key(self):
+        # the band server's --forward and the pages cannot set headers, so the token may also come as ?k=
+        given = self.headers.get("X-Epsilon-Token") or parse_qs(urlsplit(self.path).query).get("k", [""])[0]
+        return bool(self.server.token) and hmac.compare_digest(given.encode(), self.server.token.encode())
+
     def route(self, method):
         path, s = urlsplit(self.path).path, self.server
         try:
+            # on a hosted hub the message list is private: reading it needs the key too
+            if path in ("/events", "/api/state") and s.token and not (
+                    self.has_key() or self.client_address[0] in LOOPBACK):
+                raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path == "/events":
                 return self.stream()
             if method == "GET" and path == "/api/state":
@@ -165,9 +174,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def gesture(self):
         s, raw = self.server, self.read_body(4096)
-        # the band server's --forward cannot set headers, so the token may also come as ?k=
-        given = self.headers.get("X-Epsilon-Token") or parse_qs(urlsplit(self.path).query).get("k", [""])[0]
-        if s.token and not hmac.compare_digest(given.encode(), s.token.encode()):
+        if s.token and not self.has_key():
             raise Bad(401, "Missing or wrong token (X-Epsilon-Token header, or ?k= in the address).")
         b = parse_obj(raw)
         # the band server forwards {"id": ..., "time": <milliseconds>}; plain clients send {"gesture": ...}
@@ -210,8 +217,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def config(self):
         s, raw = self.server, self.read_body(16384)
-        if self.client_address[0] not in LOOPBACK:
-            raise Bad(403, "Settings can only be changed from the hub computer.")
+        if self.client_address[0] not in LOOPBACK and not self.has_key():
+            raise Bad(403, "Settings can only be changed from the hub computer, or with the key.")
         cfg = clean_config(parse_obj(raw))
         with s.lock:
             tmp = s.data / "config.json.tmp"
