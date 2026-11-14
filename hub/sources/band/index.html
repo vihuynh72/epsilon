@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+<title>Epsilon</title>
+<link rel="icon" href="../../../vexo-open-kit/projects/shared/icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Epsilon</h1>
+    <span id="band-state" class="pill">Band 44 · not connected</span>
+  </header>
+  <p id="message" class="status-line" role="status"></p>
+
+  <!-- Used by the kit's connect helper (page.js). The link choice stays out of sight:
+       USB cable by default, ?link=pretend in the address for the pretend band. -->
+  <input id="number" type="hidden">
+  <select id="link" hidden aria-hidden="true">
+    <option value="serial" selected>USB cable</option>
+    <option value="ble">Bluetooth</option>
+    <option value="pretend">Pretend band</option>
+  </select>
+  <p id="needs-server" class="note">Start the server first: <code>python3 hub/server.py</code>, then open <code>http://localhost:8000/</code>.</p>
+
+  <!-- 1. Connect -->
+  <section id="connect-view" class="view">
+    <div class="hero" aria-hidden="true">⌚</div>
+    <h2>Connect the band</h2>
+    <p class="soft">Plug the band in with its USB cable. Press the button and choose “Vexo Open band”.</p>
+    <button id="connect" class="primary">Connect band</button>
+  </section>
+
+  <!-- 2. Teach, one word at a time -->
+  <section id="teach-view" class="view" hidden>
+    <p class="step" id="teach-step"></p>
+    <div class="hero" id="teach-icon" aria-hidden="true"></div>
+    <h2 id="teach-title"></h2>
+    <p class="soft" id="teach-hint">Pause · do the gesture · pause</p>
+    <div class="dots" id="teach-dots"></div>
+    <p class="note" id="teach-note" role="status"></p>
+    <div class="actions">
+      <button id="teach-redo" class="quiet">Start this word again</button>
+      <button id="teach-skip" class="quiet">Skip for now</button>
+    </div>
+  </section>
+
+  <!-- 3. Use -->
+  <section id="use-view" class="view" hidden>
+    <div class="word-card" id="card">
+      <div class="hero" id="card-icon" aria-hidden="true">👋</div>
+      <h2 id="card-title">Ready</h2>
+      <p class="soft" id="card-hint">Make one of your gestures.</p>
+      <div class="bar" id="bar" hidden><span id="bar-fill"></span></div>
+      <button id="cancel" class="quiet" hidden>Cancel</button>
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <p class="soft small center">Tap a word to teach its gesture again.</p>
+    <ol id="recent" class="recent"></ol>
+  </section>
+
+  <details id="more">
+    <summary>Details</summary>
+    <div class="pretend-only" hidden>
+      <p class="small">Pretend band: <span id="light"></span> <span id="light-text">off</span></p>
+      <p><span id="pretend-moves"></span>
+        <button id="pretend-tap" disabled>tap</button>
+        <button id="pretend-double" disabled>double-tap</button>
+        <button id="pretend-drop" disabled>lose link</button></p>
+    </div>
+    <p><label><input type="checkbox" id="tap-help" checked> 3 quick taps send Help</label></p>
+    <p><label><input type="checkbox" id="learn" checked> Keep learning from sent gestures</label></p>
+    <p><label>Tolerance (1 = normal, lower = stricter) <input id="tolerance" type="number" step="0.1" min="0.3" max="3" size="4"></label></p>
+    <p class="small">Feed for the guardian app: <code id="feed-url">?</code></p>
+    <canvas id="picture" width="720" height="180"></canvas>
+    <pre id="log"></pre>
+    <p class="actions">
+      <button id="disconnect" class="quiet" disabled>Disconnect</button>
+      <button id="reset" class="quiet">Forget all gestures</button>
+    </p>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

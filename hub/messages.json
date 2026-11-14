@@ -1,0 +1,7 @@
+[
+  { "id": "water",   "label": "Water",   "phrase": "I want water, please.",       "icon": "💧", "colour": "#0a84ff" },
+  { "id": "food",    "label": "Food",    "phrase": "I'm hungry. I want food.",    "icon": "🍎", "colour": "#ff9f0a" },
+  { "id": "parents", "label": "Parents", "phrase": "I want my parents.",          "icon": "👪", "colour": "#bf5af2" },
+  { "id": "sleep",   "label": "Sleep",   "phrase": "I'm tired. I want to sleep.", "icon": "😴", "colour": "#5e5ce6" },
+  { "id": "help",    "label": "Help",    "phrase": "I need help!",                "icon": "🆘", "colour": "#ff3b30", "urgent": true }
+]
