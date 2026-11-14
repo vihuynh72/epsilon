@@ -30,6 +30,8 @@ def notify(event, config):
 
 def imessage(to, text):
     """True if the Bun sender in imessage/ accepted the text. Off unless EPSILON_IMESSAGE=1."""
+    if "@" not in to:  # a phone number as a parent types it: "+1 (415) 555-0100" -> "+14155550100"
+        to = "".join(ch for ch in to if ch.isdigit() or ch == "+")
     try:
         r = subprocess.run(["bun", "src/send.ts", to, text], cwd=IMESSAGE, timeout=25,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

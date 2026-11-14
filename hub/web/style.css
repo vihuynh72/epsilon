@@ -187,3 +187,9 @@ a { color: inherit; }
   .is-new { animation: fade var(--dur-short) linear; }
   .btn:active, .nav a:active { transform: none; }
 }
+
+/* settings: the sentences stay folded away until a parent asks for them */
+.more { margin-block: var(--space-md); }
+.more summary { cursor: pointer; font-weight: 500; padding-block: var(--space-sm); }
+.more summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.more[open] summary { margin-bottom: var(--space-sm); }
