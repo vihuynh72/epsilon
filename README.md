@@ -1,6 +1,6 @@
 # Epsilon
 
-Working name. A wrist band that lets a person who cannot speak send a message with a gesture or tap. The meaning goes to a guardian as a text message.
+Working name. A wrist band that lets a person who cannot speak send a message with a gesture or tap. The laptop shows the meaning on a card and speaks it.
 
 Built for VexoHacks (Nov 14, 2026) on the Vexo Open event band.
 
@@ -10,8 +10,10 @@ Read [docs/IDEA.md](docs/IDEA.md). Short version:
 
 1. Set a neutral pose (arm straight down).
 2. A guardian teaches each gesture: show it 3 times, name its meaning.
-3. The wearer makes the gesture. The laptop matches it and texts the guardian.
+3. The wearer makes the gesture. The laptop matches it, shows a card, and speaks it (ElevenLabs).
 4. The LED flashes green for "sent". A double-tap cancels.
+
+Related: Hearo (deaf and sign) is a separate idea. It is not part of this repo.
 
 Status: idea only. Nothing is tested. No autistic person has tried it yet.
 
