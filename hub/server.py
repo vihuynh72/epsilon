@@ -40,6 +40,8 @@ REPLIES = {"coming": "On my way", "ok": "Got it", "wait": "Wait a minute"}
 VIA = {"gesture", "taps", "button"}
 KEYED = ("/api/events", "/api/messages", "/api/ack")     # open to other devices that have the key
 MAX_BODY = 4096
+MAX_RECORDING = 8 * 1024 * 1024                      # a raw recording from the page
+RECORDINGS = ROOT / "data" / "recordings"              # gitignored, like all of data/
 
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/javascript", ".mjs")
@@ -254,6 +256,28 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     # --- POST ------------------------------------------------------------------------
+    def save_recording(self):
+        """POST /api/recording?name=calibration: raw band samples from the page, kept for tuning."""
+        if self.headers.get("X-Epsilon") != "1":
+            return self.send_text(400, "Bad request")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if not 0 < length <= MAX_RECORDING:
+            return self.send_text(400, "Bad size")
+        body = self.rfile.read(length)
+        try:
+            json.loads(body)
+        except ValueError:
+            return self.send_text(400, "Not JSON")
+        name = "".join(c for c in parse_qs(urlsplit(self.path).query).get("name", ["recording"])[0] if c.isalnum() or c == "-")[:40] or "recording"
+        RECORDINGS.mkdir(parents=True, exist_ok=True)
+        path = RECORDINGS / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        path.write_bytes(body)
+        print(f"{time.strftime('%H:%M:%S')}  saved {path.relative_to(ROOT)} ({length // 1024} kB)", flush=True)
+        return self.send_json(200, {"saved": str(path.relative_to(ROOT))})
+
     def read_json(self, keyed=False):
         # Without the key, the custom header is required. It makes a browser ask first (CORS
         # preflight), which this server only allows with the key: so another website open
@@ -277,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlsplit(self.path)
         path, query = url.path, parse_qs(url.query)
+        if path == "/api/recording" and self.local():
+            return self.save_recording()
         self.cors = path in KEYED and self.has_key(query)
         body = self.read_json(keyed=self.cors)
         if body is None:
@@ -287,8 +313,13 @@ class Handler(BaseHTTPRequestHandler):
             via = body.get("via")
             if m is None or via not in VIA:
                 return self.send_text(400, "Unknown word")
-            sent = FEED.publish("message", {**m, "via": via, "time": int(time.time() * 1000)})
-            print(f"{time.strftime('%H:%M:%S')}  sent  {m['label']:<8} ({via})", flush=True)
+            word = {**m, "via": via, "time": int(time.time() * 1000)}
+            confidence = body.get("confidence")
+            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) and 0 <= confidence <= 1:
+                word["confidence"] = round(float(confidence), 3)   # 1 = sure; taps are 1
+            sent = FEED.publish("message", word)
+            note = f", confidence {word['confidence']:.2f}" if "confidence" in word else ""
+            print(f"{time.strftime('%H:%M:%S')}  sent  {m['label']:<8} ({via}{note})", flush=True)
             forward(sent)
             return self.send_json(200, sent)
 

@@ -138,19 +138,25 @@ test('taps: three in 2 s is Help; a double-tap counts as two', () => {
 });
 
 // --- taps ---------------------------------------------------------------------------------
+import { readFileSync } from 'node:fs';
 import { TapDetector, TapSequencer, calibrate, TAP_DEFAULTS } from '../sources/band/gestures.js';
 
-/** Raw 416/s samples: rest, with a tap (a short ringing spike, a little wobble) at each time in `taps`. */
-function tapSamples(taps, { seconds = 3, amp = 1.0, noise = 0.01, move = null } = {}) {
+/**
+ * Raw 416/s samples with taps shaped like band 44's real ones: the hit (a 10 ms ringing spike),
+ * a rebound 120 ms later at 60 %, a small spike at 190 ms, and the wrist jolting at ~800 deg/s.
+ */
+function tapSamples(taps, { seconds = 3, amp = 2.4, noise = 0.01, move = null } = {}) {
   const out = [];
+  const ring = (d, a) => (d >= 0 && d < 40 ? a * Math.exp(-d / 6) * Math.cos(2 * Math.PI * d / 10) : 0);
   for (let i = 0; i < seconds * 416; i++) {
     const t = (i * 1000) / 416;
     const s = { t: 10000 + t, ...REST };
     for (const at of taps) {
       const d = t - at;
-      if (d >= 0 && d < 40) { s.az += amp * Math.exp(-d / 6) * Math.cos(2 * Math.PI * d / 10); s.gx += 15 * Math.exp(-d / 10); }
+      s.az += ring(d, amp) + ring(d - 120, amp * 0.6) + ring(d - 190, amp * 0.1);
+      if (d >= 0 && d < 200) s.gx += 800 * Math.exp(-d / 40) * Math.sin(2 * Math.PI * d / 80);
     }
-    if (move) Object.assign(s, Object.fromEntries(Object.entries(move(t / 1000)).map(([k, v]) => [k, (s[k] ?? 0) + v])));
+    if (move) for (const [k, v] of Object.entries(move(t / 1000))) s[k] += v;
     for (const k of ['ax', 'ay', 'az']) s[k] += (Math.random() - 0.5) * noise;
     out.push(s);
   }
@@ -163,53 +169,64 @@ function countTaps(list, settings) {
   return seqs;
 }
 
-test('taps: 3 fast taps (150 ms apart) are 3, not 1 or 2', () => {
-  assert.deepEqual(countTaps(tapSamples([500, 650, 800])), [3]);
+test('taps: one real-shaped tap (hit, rebound, after-spike) is one tap', () => {
+  assert.deepEqual(countTaps(tapSamples([500])), [1]);
 });
 
-test('taps: 3 slow taps (600 ms apart) are still one sequence of 3', () => {
-  assert.deepEqual(countTaps(tapSamples([300, 900, 1500])), [3]);
+test('taps: 1 to 5 taps are counted exactly, fast (250 ms) and slow (850 ms)', () => {
+  for (let n = 1; n <= 5; n++) {
+    assert.deepEqual(countTaps(tapSamples(Array.from({ length: n }, (_, k) => 300 + k * 250))), [n], `${n} fast`);
+    assert.deepEqual(countTaps(tapSamples(Array.from({ length: n }, (_, k) => 300 + k * 850), { seconds: 6 })), [n], `${n} slow`);
+  }
 });
 
 test('taps: two groups with a long gap are two sequences', () => {
-  assert.deepEqual(countTaps(tapSamples([200, 350, 1800, 1950, 2100], { seconds: 4 })), [2, 3]);
+  assert.deepEqual(countTaps(tapSamples([200, 450, 2400, 2650, 2900], { seconds: 5 })), [2, 3]);
 });
 
-test('taps: very fast taps (90 ms apart) are still counted one by one', () => {
-  assert.deepEqual(countTaps(tapSamples([500, 590, 680, 770])), [4]);
+test('taps: a soft brush, noise or rest gives none', () => {
+  assert.deepEqual(countTaps(tapSamples([500], { amp: 0.2 })), []);
+  assert.deepEqual(countTaps(tapSamples([], { noise: 0.06 })), []);
 });
 
-test('taps: a soft tap below the threshold is ignored, rest and noise give none', () => {
-  assert.deepEqual(countTaps(tapSamples([500], { amp: 0.1 })), []);
-  assert.deepEqual(countTaps(tapSamples([], { noise: 0.04 })), []);
-});
-
-test('taps: a smooth arm movement is not a tap', () => {
+test('taps: a smooth or brisk arm movement is not a tap', () => {
   const wave = (s) => ({ ax: 0.8 * Math.sin(2 * Math.PI * 1.5 * s), gz: 200 * Math.cos(2 * Math.PI * 1.5 * s) });
   assert.deepEqual(countTaps(tapSamples([], { move: wave })), []);
+  const shake = (s) => ({ ax: 1.5 * Math.sin(2 * Math.PI * 4 * s), gz: 400 * Math.cos(2 * Math.PI * 4 * s) });
+  assert.deepEqual(countTaps(tapSamples([], { move: shake })), []);
 });
 
-test('calibration: thresholds land between noise and taps; slow gaps set the sequence gap', () => {
-  const rec = (list, settings) => { const d = new TapDetector(settings); return list.map((s) => { const tap = d.feed(s); return { impulse: d.impulse, tap }; }); };
-  const low = { ...TAP_DEFAULTS, threshold: 0.12, refractoryMs: 50 };
-  const still = rec(tapSamples([], { noise: 0.02 }), low);
-  const slow = rec(tapSamples([200, 900, 1600, 2300, 3000], { seconds: 3.5, amp: 0.7 }), low);
-  const fast = rec(tapSamples([200, 330, 460, 590, 720], { amp: 0.7 }), low);
-  const move = rec(tapSamples([], { move: (s) => ({ ax: 0.5 * Math.sin(2 * Math.PI * s) }) }), low);
-  const { settings, warnings } = calibrate({ still, slow, fast, move });
+test('band 44, real calibration recording: 5 slow and 5 fast taps, none at rest or moving', () => {
+  const rec = JSON.parse(readFileSync(new URL('./fixtures/taps-band44.json', import.meta.url), 'utf8'));
+  const { settings, warnings } = calibrate(rec.steps);
   assert.deepEqual(warnings, []);
-  assert.ok(settings.threshold > 0.05 && settings.threshold < 0.5, `threshold ${settings.threshold}`);
-  assert.ok(settings.maxGapMs >= 900 && settings.maxGapMs <= 1200, `maxGap ${settings.maxGapMs}`);
-  assert.ok(settings.refractoryMs <= 70, `refractory ${settings.refractoryMs}`);
-  // with those settings, fast and slow soft taps both count right
-  assert.deepEqual(countTaps(tapSamples([200, 330, 460], { amp: 0.7 }), settings), [3]);
-  assert.deepEqual(countTaps(tapSamples([200, 900, 1600], { seconds: 3.5, amp: 0.7 }), settings), [3]);
+  const samplesOf = (rows) => rows.map((r) => ({ t: r[0], ax: r[1], ay: r[2], az: r[3], gx: r[4], gy: r[5], gz: r[6] }));
+  assert.deepEqual(countTaps(samplesOf(rec.steps.slow), settings), [5], 'slow');
+  assert.deepEqual(countTaps(samplesOf(rec.steps.fast), settings), [5], 'fast');
+  assert.deepEqual(countTaps(samplesOf(rec.steps.still), settings), [], 'still');
+  assert.deepEqual(countTaps(samplesOf(rec.steps.move), settings), [], 'moving');
+});
+
+test('calibration from real-shaped taps: sensible numbers, then soft and hard taps both count', () => {
+  const rows = (list) => list.map((s) => [s.t, s.ax, s.ay, s.az, s.gx, s.gy, s.gz]);
+  const { settings, warnings } = calibrate({
+    still: rows(tapSamples([], { noise: 0.02 })),
+    slow: rows(tapSamples([200, 1050, 1900, 2750, 3600], { seconds: 4 })),
+    fast: rows(tapSamples([200, 450, 700, 950, 1200])),
+    move: rows(tapSamples([], { move: (s) => ({ ax: 0.5 * Math.sin(2 * Math.PI * s) }) })),
+    more: [rows(tapSamples([200, 1000, 1800, 2600, 3400], { seconds: 4, amp: 1.2 }))],     // soft taps
+  });
+  assert.deepEqual(warnings, []);
+  assert.ok(settings.threshold < 0.6, `threshold ${settings.threshold} lets soft taps through`);
+  assert.ok(settings.maxGapMs >= 1000 && settings.maxGapMs <= 1300, `maxGap ${settings.maxGapMs}`);
+  assert.ok(settings.ringMs >= 150 && settings.ringMs < 250, `ring ${settings.ringMs}`);
+  assert.deepEqual(countTaps(tapSamples([200, 450, 700], { amp: 1.2 }), settings), [3], 'soft');
+  assert.deepEqual(countTaps(tapSamples([200, 450, 700], { amp: 4 }), settings), [3], 'hard');
 });
 
 test('reader: taps do not come out as movement gestures; a real movement still does', () => {
   const reader = new MotionReader();
-  const taps = tapSamples([1200, 1350, 1500], { seconds: 3 });
-  assert.deepEqual(read(taps, reader), [], 'taps only');
+  assert.deepEqual(read(tapSamples([1200, 1450, 1700], { seconds: 3 }), reader), [], 'taps only');
   const found = read(samples(...PRETEND.circle).map((s) => ({ ...s, t: s.t + 20000 })), reader);
   assert.equal(found.length, 1, 'the circle after them');
 });
