@@ -39,6 +39,11 @@
           <label class="field">Your phone number<input id="cfg-contact" name="contact" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 415 555 0100"></label>
           <p class="quiet">Messages are texted to this number. Start with + and the country code.</p>
           <label class="field">Your child’s name<input id="cfg-child" name="child" autocomplete="off"></label>
+          <fieldset class="urgent">
+            <legend>Emergency words</legend>
+            <p class="quiet">For these, Epsilon also sends a voice message, and never holds the message back.</p>
+            <div class="urgent-rows" id="urgent-rows"></div>
+          </fieldset>
           <details class="more">
             <summary>Change what each gesture says</summary>
             <div class="phrase-rows" id="phrase-rows"></div>

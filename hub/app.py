@@ -15,8 +15,8 @@ TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".png": "image/png", ".woff2": "font/woff2", ".mp3": "audio/mpeg"}
 # one word list for the band page (hub/server.py) and this app, so the two cannot drift apart
 WORDS = json.loads((Path(__file__).resolve().parent / "messages.json").read_text(encoding="utf-8"))
-DEFAULT_CONFIG = {"child": "", "contact": "", "phrases": {w["id"]: w["phrase"] for w in WORDS}}
 URGENT = [w["id"] for w in WORDS if w.get("urgent")]
+DEFAULT_CONFIG = {"child": "", "contact": "", "phrases": {w["id"]: w["phrase"] for w in WORDS}, "urgent": URGENT}
 LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 PAGES = {"/": "index.html", "/app": "app.html", "/sounds": "sounds.html"}
 KEEPALIVE = 15
@@ -71,6 +71,11 @@ def clean_config(b):
         if not 0 < len(k) <= 40 or not isinstance(v, str) or not 0 < len(v.strip()) <= 120:
             raise Bad(400, "Each gesture needs a name of 1 to 40 characters and a sentence of 1 to 120.")
     out = {"child": child, "contact": contact, "phrases": dict(phrases)}
+    urgent = b.get("urgent")
+    if urgent is not None:  # the family chooses which words are emergencies
+        if not isinstance(urgent, list) or any(u not in phrases for u in urgent):
+            raise Bad(400, "urgent must be a list of gesture names that have a sentence.")
+        out["urgent"] = list(dict.fromkeys(urgent))
     th = (b.get("rules") or {}).get("threshold") if isinstance(b.get("rules") or {}, dict) else None
     if th is not None:
         if not num(th) or not 0 <= th <= 1:
@@ -202,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                  "audio": None, "via": b.get("via") if isinstance(b.get("via"), str) else None}
         # decided outside the lock: the model and the voice call the network
         if g in cfg["phrases"]:
-            event.update(decide(event, recent, dict(cfg, rules={"urgent": URGENT, **cfg.get("rules", {})}), s.ask_model))
+            event.update(decide(event, recent, dict(cfg, rules={"urgent": cfg.get("urgent", URGENT), **cfg.get("rules", {})}), s.ask_model))
         else:  # a word nobody wrote a sentence for is never sent to a parent
             event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")
         if event["action"] == "call" and s.speak:

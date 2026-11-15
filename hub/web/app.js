@@ -180,6 +180,16 @@
       $("cfg-contact").value = c.contact || "";
       $("phrase-rows").replaceChildren();
       Object.entries(c.phrases || {}).forEach(([g, p]) => addRow(g, p));
+      $("urgent-rows").replaceChildren();
+      Object.keys(c.phrases || {}).forEach((g) => {
+        const box = el("input");
+        box.type = "checkbox";
+        box.value = g;
+        box.checked = (c.urgent || []).includes(g);
+        const lab = el("label", "check");
+        lab.append(box, el("span", null, g.charAt(0).toUpperCase() + g.slice(1)));
+        $("urgent-rows").append(lab);
+      });
     }
     showTests();
   }
@@ -228,6 +238,7 @@
         child: $("cfg-child").value.trim(),
         contact: $("cfg-contact").value.trim(),
         phrases,
+        urgent: [...$("urgent-rows").querySelectorAll("input:checked")].map((b) => b.value).filter((g) => g in phrases),
       });
       save.disabled = false;
       if (res.error) {

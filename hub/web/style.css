@@ -250,3 +250,7 @@ a { color: inherit; }
 .stats p { font-size: var(--text-sm); }
 .note { margin-top: var(--space-xl); max-width: 40rem; }
 .note a { color: var(--color-accent); }
+.urgent { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-sm); min-width: 0; }
+.urgent legend { font-size: var(--text-sm); font-weight: 500; padding: 0; }
+.urgent-rows { display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-md); }
+.urgent-rows .check { color: var(--color-ink); }
