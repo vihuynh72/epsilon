@@ -28,12 +28,12 @@ def notify(event, config):
     print("epsilon: #%d %s -> %s %s" % (event["id"], event["gesture"], event["action"], event["delivery"]), flush=True)
 
 
-def imessage(to, text):
-    """True if the Bun sender in imessage/ accepted the text. Off unless EPSILON_IMESSAGE=1."""
+def imessage(to, text, audio=None):
+    """True if the Bun sender in imessage/ accepted the text (and the voice message, if any). Off unless EPSILON_IMESSAGE=1."""
     if "@" not in to:  # a phone number as a parent types it: "+1 (415) 555-0100" -> "+14155550100"
         to = "".join(ch for ch in to if ch.isdigit() or ch == "+")
     try:
-        r = subprocess.run(["bun", "src/send.ts", to, text], cwd=IMESSAGE, timeout=25,
+        r = subprocess.run(["bun", "src/send.ts", to, text] + ([str(audio)] if audio else []), cwd=IMESSAGE, timeout=40,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     except (OSError, subprocess.TimeoutExpired) as e:
         print("epsilon: iMessage not sent: %s" % type(e).__name__, flush=True)
@@ -201,7 +201,8 @@ class Handler(BaseHTTPRequestHandler):
             if s.speak("A message from %s: %s" % (cfg["child"] or "your child", event["text"]), s.data / "audio" / name):
                 event["audio"] = "/audio/" + name
         if event["action"] != "held" and s.send and event["to"]:
-            event["delivery"] = "sent" if s.send(event["to"], event["text"]) else "failed"
+            clip = s.data / "audio" / event["audio"][7:] if event["audio"] else None
+            event["delivery"] = "sent" if s.send(event["to"], event["text"], clip) else "failed"
         with s.lock:
             event = dict(event, id=s.next_id)
             line = json.dumps(event)
