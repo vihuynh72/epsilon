@@ -98,6 +98,14 @@ export class Recorder {
         body,
         keepalive: leaving && body.size < 60000,
       });
+      if (r.status === 404) {                     // a server without a recording endpoint (e.g. the guardian app)
+        this.offline = true;
+        this.fullLog = false;
+        this.done = (this.done ?? []).concat(data.events ?? []).slice(-400);
+        this.onOffline?.();
+        this.log('this server keeps no recordings: they stay in the browser (Details, Download data)');
+        return;
+      }
       const answer = await r.json();
       if (!leaving) this.log(`saved ${answer.saved}`);
     } catch (e) {
