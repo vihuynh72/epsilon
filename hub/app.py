@@ -209,6 +209,9 @@ class Handler(BaseHTTPRequestHandler):
             raise Bad(400, "confidence must be a number.")
         if t is not None and not num(t):
             raise Bad(400, "time must be epoch seconds as a number.")
+        spoken = b.get("text") if b.get("via") == "voice" else None
+        if spoken is not None and (not isinstance(spoken, str) or not 1 <= len(spoken.strip()) <= 200):
+            raise Bad(400, "text must be 1 to 200 characters of what was said.")
         with s.lock:
             cfg, recent = s.config, [e for e in s.events[::-1][:20] if "action" in e]
         event = {"time": float(time.time() if t is None else t), "gesture": g, "confidence": c,
@@ -216,7 +219,10 @@ class Handler(BaseHTTPRequestHandler):
                  "audio": None, "via": b.get("via") if isinstance(b.get("via"), str) else None}
         # decided outside the lock: the model and the voice call the network
         started = time.time()
-        if g in cfg["phrases"]:
+        if spoken:  # written down from speech and confirmed by a person on the Sounds page
+            event.update(text=spoken.strip(), action="text", by="rules",
+                         reason="Spoken aloud, written down by Deepgram, and confirmed by a person.")
+        elif g in cfg["phrases"]:
             event.update(decide(event, recent, dict(cfg, rules={"urgent": cfg.get("urgent", URGENT), **cfg.get("rules", {})}), s.ask_model))
         else:  # a word nobody wrote a sentence for is never sent to a parent
             event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")

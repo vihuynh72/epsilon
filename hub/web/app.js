@@ -39,7 +39,7 @@
 
   /** Everything else about a message, shown only when the small line is opened. */
   function detailOf(e) {
-    const how = { gesture: "by gesture", taps: "by taps", sound: "by sound", button: "by a test button" }[e.via];
+    const how = { gesture: "by gesture", taps: "by taps", sound: "by sound", button: "by a test button", voice: "by voice" }[e.via];
     const parts = [cap1(e.gesture) + (how ? " " + how : "")];
     if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "% match");
     if (e.delivery === "sent" && e.to) parts.push("texted to " + who(e.to));

@@ -201,6 +201,19 @@ async function listen() {
       b.onclick = () => settle(said, said, Object.assign(attempt, { sure: true, score: 1 }), true);
       $("result-actions").prepend(b);
     }
+    // any sentence Deepgram could write down: a person can read it and choose to send it as it is
+    if (d.ok && attempt.heard && !said) {
+      const sentence = (d.text || "").trim();
+      const b = el("button", "btn btn-primary", "Send what was said");
+      b.type = "button";
+      b.onclick = async () => {
+        $("result-actions").replaceChildren();
+        const sent = await post("/gesture", { gesture: "spoken", text: sentence, via: "voice" });
+        $("result-detail").textContent = sent.ok ? "Sent to Messages: “" + sentence + "”" : (sent.error || "Could not send.");
+      };
+      $("result-text").textContent = "“" + sentence + "”";
+      $("result-actions").prepend(b);
+    }
     const votes = heardVotes[attempt.heard];
     const learned = votes ? Object.entries(votes).sort((a, b) => b[1] - a[1])[0] : null;
     $("result-heard").textContent = !d.ok ? (d.error || "Deepgram did not answer.")

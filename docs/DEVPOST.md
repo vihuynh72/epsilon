@@ -62,4 +62,18 @@ A false message is a real harm. It puts words in the mouth of someone who cannot
 
 ## Sponsor tracks
 
-Vexo, Gemini, Photon, ElevenLabs.
+Enter these three. Each is really used in the demo:
+
+- **Google DeepMind (Gemini).** A fast Gemini model decides every message in under a second: text, emergency voice message, or hold back, with a one-sentence reason shown to the parent. Gemini 4 reads the day's messages and writes a short summary with one practical suggestion.
+- **ElevenLabs.** Speaks the emergency sentence. The recording arrives in the parent's iMessage thread as a voice message.
+- **Deepgram.** On the Sounds page, writes down what a person says, so a spoken word or sentence can be sent as a message after a person confirms it.
+
+Do not enter these. We did not use them, and claiming them would be untrue:
+
+- **Stripe.** Nothing in the project takes a payment.
+- **Pipecat.** The voice features call ElevenLabs and Deepgram directly. Pipecat is not used.
+
+## Try it out
+
+- Code: https://github.com/vihuynh72/epsilon
+- Live demo: the Railway address, opened with the team's key on the end. Ask Vi for the full link. Do not paste the key into a public page unless the phone relay is switched off first, because anyone with the key can send a test message.
