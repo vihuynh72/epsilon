@@ -10,6 +10,9 @@
   const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
   if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
+  // never show a whole phone number on screen: these pages get shared and filmed
+  const who = (to) => (/^[+\d][\d ()-]{6,}$/.test(to) ? "the number ending " + to.replace(/\D/g, "").slice(-2) : to);
+
   function el(tag, cls, text) {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -29,7 +32,7 @@
     // when the decision model chose, show its own one-line reason: this is the decision log
     const why = e.by === "model" && e.reason ? " · Gemini: " + e.reason : "";
     if (e.action === "call") return ["Urgent voice message" + why, false];
-    if (e.delivery === "sent") return [(e.to ? "Texted to " + e.to : "Texted") + why, false];
+    if (e.delivery === "sent") return [(e.to ? "Texted to " + who(e.to) : "Texted") + why, false];
     if (e.delivery === "failed") return ["Could not send" + why, true];
     return ["Logged" + why, false];
   }
@@ -58,7 +61,7 @@
     if (!latestText) return;
     const e = events[0];
     latestText.textContent = e ? e.text : "No messages yet. Send a test from the messages page.";
-    $("latest-meta").textContent = e ? when(e.time) + (e.to ? " · to " + e.to : "") : "";
+    $("latest-meta").textContent = e ? when(e.time) + (e.to ? " · to " + who(e.to) : "") : "";
     if (animate) replay(latestText);
   }
 
