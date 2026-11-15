@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Epsilon</title>
+  <meta name="description" content="One gesture. One message home.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <nav class="nav" aria-label="Main">
+    <a class="wordmark" href="/" aria-current="page">Epsilon</a>
+    <a href="#how">How it works</a>
+    <a class="btn-primary" href="/app">Open messages</a>
+  </nav>
+
+  <main>
+    <section class="hero page">
+      <div class="hero-text">
+        <h1>One gesture. One message home.</h1>
+        <p>Epsilon lets a child who does not speak ask for water, a break, or help with a small wrist movement. The people who care for them get it as a plain message.</p>
+        <a class="btn btn-primary" href="/app">Open messages</a>
+      </div>
+      <aside class="live-card" aria-label="Latest message" aria-live="polite">
+        <p class="quiet meta">Latest message</p>
+        <p class="latest-text" id="latest-text">No messages yet. Send a test from the messages page.</p>
+        <p class="quiet meta nums" id="latest-meta"></p>
+      </aside>
+    </section>
+
+    <section class="how page" id="how">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li>
+          <span class="numeral" aria-hidden="true">1</span>
+          <div class="step-body">
+            <h3>The gesture</h3>
+            <p>The wearer makes a wrist movement they were taught. The band recognises it.</p>
+          </div>
+        </li>
+        <li>
+          <span class="numeral" aria-hidden="true">2</span>
+          <div class="step-body">
+            <h3>The message</h3>
+            <p>Each gesture maps to a sentence the family wrote. Software picks the sentence. It never invents one.</p>
+          </div>
+        </li>
+        <li>
+          <span class="numeral" aria-hidden="true">3</span>
+          <div class="step-body">
+            <h3>The check</h3>
+            <p>A weak or doubtful match is held back, so parents are not sent messages their child did not mean.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="band">
+      <div class="page">
+        <h2>What this is, plainly</h2>
+        <ul>
+          <li>A hackathon prototype, built in a day.</li>
+          <li>Not yet tested with autistic users.</li>
+          <li>It does not read minds. The wearer’s gesture comes first.</li>
+          <li>Nothing is ever sent on the wearer’s behalf.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer page">
+    <p class="quiet">Epsilon · built at VexoHacks, 14 November 2026</p>
+    <a href="/app">Open messages</a>
+  </footer>
+</body>
+</html>

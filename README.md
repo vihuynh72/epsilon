@@ -21,7 +21,8 @@ Status: idea only. Nothing is tested. No autistic person has tried it yet.
 
 | Path | What it is |
 |---|---|
-| `docs/IDEA.md` | The plan, risks, open questions |
+| `docs/IDEA.md` | The idea, risks, open questions |
+| `docs/PLAN.md` | The team plan: how the parts fit, who builds what, the schedule |
 | `vexo-open-kit/` | Vexo Open kit (MIT), unmodified. Use it to connect and test the band |
 | `hub/` | Our code goes here (`sources/`, `skills/`, `sinks/`) |
 | `data/` | Local recordings and test data. Ignored by git |

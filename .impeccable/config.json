@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "hub/web/index.html"
+        ],
+        "createdAt": "2026-11-14T23:49:43.129Z",
+        "reason": "agent measured in Chrome: rendered h1 104px, h2 40px, body 16px (2.6x and 2.5x steps); sizes come from clamp() tokens in tokens.css that the static scan does not resolve"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "hub/web/app.html"
+        ],
+        "createdAt": "2026-11-14T23:49:43.158Z",
+        "reason": "agent measured in Chrome: rendered h1 104px, h2 40px, body 16px (2.6x and 2.5x steps); sizes come from clamp() tokens in tokens.css that the static scan does not resolve"
+      }
+    ]
+  }
+}
