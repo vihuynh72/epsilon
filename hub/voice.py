@@ -60,7 +60,59 @@ def ring(to, audio_url):
     return False
 
 
-def guess_word(audio, mime, words):
+TEACH_MODEL = "gemini-4-hydrogen"       # teaching: listens to a taught sound and writes it into the sound book
+LISTEN_MODEL = "gemini-flash-latest"    # action: the fast model listens when Deepgram hears no words
+WORD_MODEL = "gemini-flash-lite-latest"  # action: the fast decision model picks the word from Deepgram's text
+
+
+def hear_words(audio, mime):
+    """Deepgram: the words in one short recording, or "" (also when there is no key or no answer)."""
+    import json
+    key = keys.get("DEEPGRAM_API_KEY")
+    if not key or not audio:
+        return ""
+    req = urllib.request.Request(  # mip_opt_out: Deepgram must not keep this sound to train its models
+        "https://api.deepgram.com/v1/listen?model=nova-3&filler_words=true&mip_opt_out=true", data=audio,
+        headers={"Authorization": "Token " + key, "Content-Type": mime})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return str(json.load(r)["results"]["channels"][0]["alternatives"][0]["transcript"])[:200].strip()
+    except Exception as e:
+        print("hear_words failed: %s" % type(e).__name__, flush=True)
+        return ""
+
+
+def pick_word(text, words, known=None):
+    """The fast decision model: which of the family's words does this written-down speech mean?
+    Returns {"word", "confidence", "heard"} or None."""
+    import json
+    key = keys.get("GEMINI_API_KEY")
+    if not key or not text or not words:
+        return None
+    prompt = ("A speech-to-text service wrote this from a short recording of one person, who may speak unclearly: "
+              "\"%s\". Which ONE of these words do they mean: %s? Answer \"unsure\" if it is not clearly one of "
+              "them. Give your confidence from 0 to 1." % (text[:200], ", ".join(words)))
+    if known:
+        prompt += (" A carer has confirmed this person's own sounds before: %s. If the text matches one of those "
+                   "sounds, answer that meaning." % "; ".join('"%s" means %s' % (k[0], k[1]) for k in known[:20]))
+    body = {"contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": {
+                "type": "OBJECT", "required": ["word", "confidence"], "properties": {
+                    "word": {"type": "STRING", "enum": list(words) + ["unsure"]}, "confidence": {"type": "NUMBER"}}}}}
+    req = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % (keys.get("GEMINI_MODEL") or WORD_MODEL),
+        data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=6) as r:
+            out = json.loads(json.load(r)["candidates"][0]["content"]["parts"][0]["text"])
+        conf = out.get("confidence")
+        return {"word": out["word"], "heard": text, "confidence": max(0.0, min(1.0, float(conf))) if isinstance(conf, (int, float)) else 0.0}
+    except Exception as e:
+        print("pick_word failed: %s" % type(e).__name__, flush=True)
+        return None
+
+
+def guess_word(audio, mime, words, known=None, model=None):
     """Ask Gemini to listen to one short recording and say which of the family's words it most likely is.
     For speech that is unclear or unusual. Returns {"word": one of words or "unsure", "confidence": 0..1,
     "heard": str} or None. The answer is only ever a suggestion: a person confirms it before anything is sent."""
@@ -69,12 +121,17 @@ def guess_word(audio, mime, words):
     key = keys.get("GEMINI_API_KEY")
     if not key or not audio or not words:
         return None
-    model = keys.get("GEMINI_AUDIO_MODEL") or "gemini-flash-latest"
+    model = model or keys.get("GEMINI_AUDIO_MODEL") or LISTEN_MODEL
     prompt = ("This is a short recording of one person trying to say ONE of these words: %s. "
               "They may speak unclearly, slowly, or pronounce it in an unusual way, for example only the vowels "
               "or only the first sound. Decide which word it most likely is. If it is silence, noise, or could "
-              "be two of the words equally, answer \"unsure\". Give your confidence from 0 to 1, and write "
-              "in `heard` roughly what it sounded like." % ", ".join(words))
+              "be two of the words equally, or does not sound like one of the words or a sound a carer has "
+              "confirmed, answer \"unsure\". Never guess. Give your confidence from 0 to 1, and write "
+              "in `heard` roughly what it sounded like, spelled as it sounds." % ", ".join(words))
+    if known:  # what this family has taught so far: the person's own sounds, confirmed by a carer
+        prompt += (" This person has their own way of saying things. A carer has confirmed these before: %s. "
+                   "If the recording sounds like one of these, answer that meaning, even if it is nothing like "
+                   "the word itself." % "; ".join('a sound like "%s" means %s (confirmed %d times)' % k for k in known[:20]))
     body = {"contents": [{"parts": [{"inline_data": {"mime_type": mime, "data": base64.b64encode(audio).decode()}},
                                     {"text": prompt}]}],
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": {

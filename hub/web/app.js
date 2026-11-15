@@ -120,6 +120,18 @@
       renderAll();
     }
     showLatest(events[0] === e);
+    showSafe(safeAt);
+  }
+
+  // After an emergency the parent can say "I am with them": that ends emergency listening on the band.
+  let safeAt = 0;
+  function showSafe(at) {
+    safeAt = Math.max(safeAt, at);
+    const b = $("safe");
+    if (!b) return;
+    const open = events.some((e) => e.action === "call" && e.time > safeAt && Date.now() / 1000 - e.time < 600);
+    b.hidden = !open;
+    b.onclick = async () => { b.disabled = true; const r = await post("/api/safe", {}); b.disabled = false; if (r.data) showSafe(r.data.safe_at); };
   }
 
   async function loadState(first) {
@@ -131,6 +143,8 @@
       events = [...seen.values()].sort((a, b) => b.id - a.id).slice(0, 100);
       renderAll();
       if (first && s.config) showConfig(Object.assign({ urgent: s.urgent || [] }, s.config));
+      showSafe(s.safe_at || 0);
+      if ($("line-note")) $("line-note").textContent = s.line ? "One last step: from that phone, send one iMessage to " + s.line + ". After that, texts can reach it." : "";
     } catch (err) {
       /* the stream will retry; the page keeps what it has */
     }
@@ -258,6 +272,8 @@
       return false;
     }
     showConfig(res.data);
+    setTimeout(() => loadState(false), 9000);   // the texting service takes a few seconds to register a new number
+    setTimeout(() => loadState(false), 25000);
     save.dataset.state = "saved";
     save.textContent = "Saved";
     saveTimer = setTimeout(() => { save.textContent = "Save"; delete save.dataset.state; }, 2000);

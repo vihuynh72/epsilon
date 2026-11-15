@@ -28,7 +28,7 @@ let BAND = HOSTED ? savedBand : 44;   // with the server: the team's band, Vexo-
 const EXAMPLES = 3;               // tries per word while teaching
 const MAX_LEARNED = 4;            // examples per word picked up while in use
 const CONFIRM_MS = 1500;          // time to cancel before a word is sent
-const PAUSE_MS = 3000;            // teaching: the pause before each try
+const PAUSE_MS = 1500;            // teaching: the pause before each try (was 3000: it felt too slow)
 const GO_MS = 3500;               // teaching: the longest a movement try may take
 const DONE_QUIET_MS = 400;        // teaching: still this long after moving = the try is over
 const WAVE_MS = 4000;             // the live picture shows the last 4 seconds
@@ -72,7 +72,7 @@ function showAppSwitch() {
     : on ? appHosts.join(', ') : '';
 }
 $('#to-app').disabled = !appHosts.length;
-try { $('#to-app').checked = appHosts.length > 0 && localStorage.getItem(APP_STORE) === 'on'; } catch { /* private window */ }
+try { $('#to-app').checked = appHosts.length > 0 && localStorage.getItem(APP_STORE) !== 'off'; } catch { /* private window */ }
 $('#to-app').onchange = () => {
   try { localStorage.setItem(APP_STORE, $('#to-app').checked ? 'on' : 'off'); } catch { /* private window */ }
   log(`send to the guardian app: ${$('#to-app').checked ? 'on' : 'off'}`);
@@ -167,10 +167,10 @@ function line(el, text, kind = '') {
 // steps fill dots as taps are felt and end early once all were felt. Everything recorded is
 // saved to data/recordings/ on this laptop, so it can be studied and used as test data.
 const CALIB_STEPS = [
-  { key: 'still', icon: '', title: 'Wear the band and rest your arm', hint: 'Calibrate on the wrist, not on a table', ms: 3000 },
-  { key: 'slow', icon: '👆', title: 'Tap the band 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
-  { key: 'fast', icon: '⚡', title: 'Now tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
-  { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like usual, no taps', ms: 4000 },
+  { key: 'still', icon: '', title: 'Wear the band and rest your arm', hint: 'Calibrate on the wrist, not on a table', ms: 2000 },
+  { key: 'slow', icon: '👆', title: 'Tap the band 4 times, slowly', hint: 'About one tap a second.', taps: 4, ms: 6500 },
+  { key: 'fast', icon: '⚡', title: 'Now tap 4 times, quickly', hint: 'As fast as feels natural.', taps: 4, ms: 4000 },
+  { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like usual, no taps', ms: 2500 },
 ];
 const MOVES = [
   ['left', '⬅️', 'Move your hand to the left'], ['right', '➡️', 'Move your hand to the right'],
@@ -273,7 +273,7 @@ function finishCalibration() {
   const { then, name } = calib;
   calib = null;
   const felt = taps.slow + taps.fast;
-  if (felt >= 6 || !tapSettings) {
+  if (felt >= 5 || !tapSettings) {   // 4 slow + 4 fast are asked for; 5 felt is enough to trust the measurement
     write(TAP_STORE, settings);
     useTapSettings(settings);
   } else {
@@ -289,7 +289,7 @@ function finishCalibration() {
   dots($('#calib-dots'), 0, 0);
   line($('#calib-phase'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
-  afterCalib = setTimeout(() => { if (band && !calib && !teaching) then(); }, warnings.length ? 3500 : 1500);
+  afterCalib = setTimeout(() => { if (band && !calib && !teaching) then(); }, warnings.length ? 2500 : 700);
 }
 let afterCalib = null;
 $('#calib-skip').onclick = () => {
@@ -489,7 +489,7 @@ function finishWord() {
     rec.event({ kind: 'teach-sound', word: id });
     line($('#teach-phase'), 'Saved: the sound', 'go');
     line($('#teach-note'), '');
-    teaching.timer = setTimeout(nextWord, 1100);
+    teaching.timer = setTimeout(nextWord, 600);
     return;
   }
   const tapTries = tries.filter((t) => t.taps);
@@ -518,7 +518,7 @@ function finishWord() {
   line($('#teach-phase'), `Saved: ${describe(id)}`, 'go');
   line($('#teach-note'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
-  teaching.timer = setTimeout(nextWord, 1100);
+  teaching.timer = setTimeout(nextWord, 600);
 }
 function nextWord() {
   if (!teaching) return;

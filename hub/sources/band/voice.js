@@ -5,7 +5,10 @@ import { Band, BandAudio } from '../../../vexo-open-kit/js/src/index.js';
 const $ = (id) => document.getElementById(id);
 const SECONDS = 5, RATE = 16000;
 const label = (w) => w.charAt(0).toUpperCase() + w.slice(1);
-let band = null, words = [], urgent = [];
+let band = null, words = [], urgent = [], busy = false, lastTap = 0;
+const SURE = 0.85;   // send without asking only when Gemini is at least this sure
+const EMERGENCY_MS = 120000;  // after an emergency, keep listening for at most this long
+let emergency = 0;   // when emergency listening started, or 0
 
 try { $('number').value = new URLSearchParams(location.search).get('band') || localStorage.getItem('epsilon-band') || '44'; } catch { $('number').value = '44'; }
 fetch('/api/info').then((r) => r.json()).then((i) => {
@@ -51,6 +54,17 @@ $('connect').onclick = async () => {
     try { localStorage.setItem('epsilon-band', String(n)); } catch { /* private window */ }
     $('state').textContent = 'Connected to ' + band.name + '.';
     $('listen').disabled = false;
+    // Tap to speak: one tap on the band starts listening. Tap again for the next message.
+    await band.configure({ events: true });
+    const onTap = () => {
+      if (Date.now() - lastTap < 1500) return;
+      lastTap = Date.now();
+      if (emergency) { emergency = 0; $('status').textContent = 'Stopped by a tap. Tap again to speak.'; return; } // the wearer says: enough
+      listen();
+    };
+    band.on('tap', onTap);
+    band.on('double-tap', onTap);
+    $('status').textContent = 'Ready. Tap the band, then speak.';
     band.on('disconnect', () => { $('state').textContent = 'The band disconnected. Connect again.'; $('listen').disabled = true; });
   } catch (e) {
     $('state').textContent = e.message; // the kit's messages say what to do next
@@ -65,7 +79,19 @@ async function send(body, done) {
     : e.action === 'held' ? 'Not sent. ' + (e.reason || '') : (e.action === 'call' ? 'Sent as an emergency. ' : 'Sent. ') + done;
 }
 
-$('listen').onclick = async () => {
+async function light(colour) {  // a short flash on the band: green = sent, amber = not sent
+  try { await band.setLed(colour, { pattern: 'flash', period: 300 }); setTimeout(() => band.ledOff().catch(() => {}), 1500); } catch { /* light busy */ }
+}
+
+$('listen').onclick = () => listen();
+
+async function listen() {
+  if (busy || !band) return;
+  busy = true;
+  try { await listenOnce(); } finally { busy = false; }
+}
+
+async function listenOnce() {
   const chunks = [];
   let sound, stop;
   $('listen').disabled = true;
@@ -88,7 +114,7 @@ $('listen').onclick = async () => {
   // Silence must never become a message: on a silent recording a model can still name a word.
   let sum = 0, count = 0;
   for (const c of chunks) { for (const v of c) sum += v * v; count += c.length; }
-  if (Math.sqrt(sum / Math.max(1, count)) < 0.01) { $('status').textContent = 'Nothing was heard. Speak closer to the band and try again.'; return; }
+  if (Math.sqrt(sum / Math.max(1, count)) < 0.01) { $('status').textContent = 'Nothing was heard. Tap the band and speak closer to it.'; light('#ff9f0a'); return; }
 
   $('status').textContent = 'Gemini and Deepgram are listening…';
   const clip = wav(chunks);
@@ -109,4 +135,47 @@ $('listen').onclick = async () => {
   }));
   if (said) actions.append(button('Send what was said', !word, () => send({ gesture: 'spoken', text: said, via: 'voice' }, 'Open Messages to see it.')));
   actions.append(button('It was nothing', false, () => { $('result').hidden = true; }));
-};
+  // Hands-free: a word Gemini is sure of goes straight out, so the wearer only taps and speaks.
+  // two signals must agree: the model's pick, and either the word itself or a taught sound in what was written down
+  if ($('auto').checked && word && g.confidence >= SURE && g.agreed) {
+    const own = urgent.includes(word) ? (await post('/api/clip', clip, 'audio/wav')).audio || null : null;
+    await send({ gesture: word, via: 'voice', confidence: g.confidence, audio: own }, 'Tap the band to speak again.');
+    light('#00ff00');
+    if (urgent.includes(word)) { emergency = Date.now(); setTimeout(keepListening, 400); }
+  } else {
+    light('#ff9f0a');
+  }
+  $('status').textContent = 'Tap the band to speak again.';
+}
+
+// After an emergency: keep listening in short turns and pass on anything that is said, so the parent is not
+// left guessing. It ends when the wearer taps the band, the parent checks in, or two minutes have passed.
+async function keepListening() {
+  const started = emergency;
+  while (emergency === started && Date.now() - started < EMERGENCY_MS && band) {
+    const safe = await fetch('/api/safe').then((r) => r.json()).catch(() => ({}));
+    if ((safe.safe_at || 0) * 1000 > started) { $('status').textContent = 'The parent checked in. Listening has stopped.'; break; }
+    const chunks = [];
+    let sound, stop;
+    busy = true;
+    try {
+      sound = new BandAudio((samples) => chunks.push(Float32Array.from(samples)));
+      stop = band.on('audio', (a) => sound.push(a));
+      await band.configure({ audio: true });
+      $('status').textContent = 'Emergency: still listening. Tap the band to stop.';
+      await new Promise((r) => setTimeout(r, SECONDS * 1000));
+    } catch { /* the link dropped: the loop ends below */ } finally {
+      try { await band.configure({ audio: false }); } catch { emergency = 0; }
+      if (stop) stop();
+      if (sound) sound.close();
+      busy = false;
+    }
+    if (emergency !== started) break;   // tapped while listening
+    let sum = 0, count = 0;
+    for (const c of chunks) { for (const v of c) sum += v * v; count += c.length; }
+    if (!count || Math.sqrt(sum / count) < 0.01) continue;   // silence is never sent
+    const said = ((await post('/api/transcribe', wav(chunks), 'audio/wav')).text || '').trim();
+    if (said) await post('/gesture', { gesture: 'spoken', text: 'After the emergency: ' + said, via: 'voice' });
+  }
+  if (emergency === started) { emergency = 0; if (!/checked in/.test($('status').textContent)) $('status').textContent = 'Emergency listening ended. Tap the band to speak.'; }
+}

@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from hub.decide import decide, gemini_ask
 from hub.insight import summarise as summarise_day
 from hub.keys import get as get_key
-from hub.voice import guess_word, speak
+from hub.voice import TEACH_MODEL, guess_word, hear_words, pick_word, speak
 
 WEB = Path(__file__).resolve().parent / "web"
 IMESSAGE = Path(__file__).resolve().parent.parent / "imessage"
@@ -107,6 +107,8 @@ def make_server(host, port, data, token="", ask_model=None, speak=None, send=Non
     s.ask_model, s.speak, s.send = ask_model, speak, send  # None in tests, so they never touch the network
     s.summarise = summarise  # the day summary: also None in tests
     s.trust_local = trust_local  # the hub's own computer may send gestures without the key (off in tests)
+    s.safe_at = 0  # when a parent last pressed "I am with them": ends emergency listening on the band
+    s.line = ""    # the Epsilon number the saved phone must text once, so texts are allowed to reach it
     s.data.mkdir(parents=True, exist_ok=True)
     try:
         s.config = clean_config(json.loads((s.data / "config.json").read_text(encoding="utf-8")))
@@ -187,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/guess", "/api/clip", "/api/health", "/api/insight") and s.token and not (
+            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/guess", "/api/learn", "/api/clip", "/api/safe", "/api/health", "/api/insight") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path in ("/events", "/api/events"):  # /api/events: the band page listens here
@@ -196,7 +198,8 @@ class Handler(BaseHTTPRequestHandler):
                 with s.lock:
                     # "urgent" is the emergency list in force: settings saved before it existed use the default
                     urgent = s.config.get("urgent", [u for u in URGENT if u in s.config["phrases"]])
-                    return self.reply(200, {"config": s.config, "urgent": urgent, "events": s.events[-100:][::-1]})
+                    return self.reply(200, {"config": s.config, "urgent": urgent, "safe_at": s.safe_at, "line": s.line,
+                                            "events": s.events[-100:][::-1]})
             if method == "GET" and path in PAGES:
                 return self.static(PAGES[path])
             if method == "GET" and path == "/band":  # the band page: connect, teach, recognise
@@ -227,6 +230,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.insight()
             if method == "POST" and path == "/api/transcribe":
                 return self.transcribe()
+            if path == "/api/safe":  # the parent checked in; GET lets the band page ask
+                if method == "POST":
+                    s.safe_at = time.time()
+                return self.reply(200, {"ok": True, "safe_at": s.safe_at})
             if method == "POST" and path == "/api/clip":  # the person's own voice, kept only to send with an emergency
                 raw = self.read_body(600_000)
                 if not raw:
@@ -237,9 +244,43 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {"ok": True, "audio": "/audio/" + name})
             if method == "POST" and path == "/api/guess":  # Gemini listens to one recording and suggests a word
                 raw = self.read_body(600_000)
-                found = guess_word(raw, self.headers.get("Content-Type", "audio/wav"), list(s.config["phrases"])) \
-                    if s.ask_model else None  # off in tests
-                return self.reply(200, dict({"ok": bool(found)}, **(found or {"error": "Gemini did not answer."})))
+                if not s.ask_model:  # off in tests
+                    return self.reply(200, {"ok": False, "error": "Gemini did not answer."})
+                ctype, words, book = self.headers.get("Content-Type", "audio/wav"), list(s.config["phrases"]), self.taught()
+                # Action mode. First Deepgram writes down the words and the fast decision model picks one.
+                text = hear_words(raw, ctype)
+                found = pick_word(text, words, book) if text else None
+                if found and found["confidence"] < 0.8:  # a half-guess is not an answer (seen: "baba" -> parents, 70%)
+                    found["word"] = "unsure"
+                if found and found["word"] != "unsure":
+                    found["by"] = "Deepgram and the Gemini decision model"
+                else:  # no clear words: the fast Gemini model listens to the sound itself, with the sound book
+                    heard = guess_word(raw, ctype, words, book)
+                    if heard and heard["word"] != "unsure" and heard["confidence"] < 0.9:
+                        heard["word"] = "unsure"  # listening alone must be very sure, or it stays quiet
+                    if heard:
+                        found = dict(heard, by="the Gemini decision model, listening")
+                # A second, independent signal, with no model in it: the word itself was written down, or what was
+                # written down is a sound this family has taught for that word. Hands-free sending needs both to agree.
+                squash = lambda t: "".join(ch for ch in str(t).lower() if ch.isalnum())
+                if found:
+                    said = "".join(ch if ch.isalnum() else " " for ch in text.lower()).split()
+                    found["agreed"] = found["word"] != "unsure" and (
+                        found["word"] in said or any(m == found["word"] and squash(a) and squash(a) == squash(text) for a, m, _ in book))
+                return self.reply(200, dict({"ok": bool(found), "text": text}, **(found or {"error": "Gemini did not answer."})))
+            if method == "POST" and path == "/api/learn":  # teaching: Gemini 4 Hydrogen writes the sound into the book
+                meaning = parse_qs(urlsplit(self.path).query).get("meaning", [""])[0]
+                raw = self.read_body(600_000)
+                if meaning not in s.config["phrases"]:
+                    raise Bad(400, "meaning must be one of the words in Set up.")
+                heard = guess_word(raw, self.headers.get("Content-Type", "audio/wav"), list(s.config["phrases"]), None,
+                                   TEACH_MODEL) if s.ask_model else None
+                sounded = str((heard or {}).get("heard") or "").strip().lower()[:40]
+                if sounded:
+                    with s.lock, open(s.data / "sounds.jsonl", "a", encoding="utf-8") as f:
+                        f.write(json.dumps({"time": time.time(), "meaning": meaning, "sounded": sounded, "taught": True}) + "\n")
+                return self.reply(200, {"ok": bool(sounded), "sounded": sounded,
+                                        "book": [{"sounded": a, "meaning": m, "times": n} for a, m, n in self.taught()[:12]]})
             if method == "GET" and path.startswith("/static/"):
                 return self.static(unquote(path[8:]))
             if method == "GET" and path.startswith("/audio/"):
@@ -391,6 +432,21 @@ class Handler(BaseHTTPRequestHandler):
         out = s.summarise(events, cfg)
         self.reply(200, dict(out, ok=True) if out else {"ok": False, "error": "Gemini did not answer. Try again in a moment."})
 
+    def taught(self):
+        """The family's own sound book: how each confirmed sound was described, and what it meant.
+        Read from the sound log on this computer, and given to the model on every listen so it learns."""
+        book, log = {}, self.server.data / "sounds.jsonl"
+        if log.exists():
+            for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                sounded, meaning = str(r.get("sounded") or "").strip().lower()[:40], r.get("meaning")
+                if sounded and meaning in self.server.config["phrases"]:
+                    book[(sounded, meaning)] = book.get((sounded, meaning), 0) + 1
+        return [(k[0], k[1], n) for k, n in sorted(book.items(), key=lambda kv: -kv[1])]
+
     def sound_log(self, method):
         """Each sound the page tried: what it guessed and what a person said it was. This is how we see it improve."""
         s, log = self.server, self.server.data / "sounds.jsonl"
@@ -403,17 +459,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise Bad(400, "guess must be text of at most 40 characters, or null.")
             if not num(score) or not isinstance(heard, str) or len(heard) > 200:
                 raise Bad(400, "score must be a number and heard must be text of at most 200 characters.")
+            sounded = b.get("sounded") if isinstance(b.get("sounded"), str) else ""
             row = {"time": time.time(), "guess": guess, "meaning": meaning, "score": score, "heard": heard,
-                   "sure": b.get("sure") is True}
+                   "sure": b.get("sure") is True, "sounded": sounded[:40]}
             with s.lock, open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
         rows = []
         if log.exists():
             for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
                 try:
-                    rows.append(json.loads(line))
+                    row = json.loads(line)
                 except ValueError:
-                    pass
+                    continue
+                if not row.get("taught"):  # a taught sound is a lesson, not a try
+                    rows.append(row)
         right = [r.get("sure") is True and r.get("guess") == r.get("meaning") for r in rows]
         by, mixups = {}, {}   # per meaning: how often the first guess was right, and what it was mistaken for
         for r, ok in zip(rows, right):
@@ -426,7 +485,8 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, {"ok": True, "total": len(rows), "right": sum(right),
                          "last10": len(right[-10:]), "last10_right": sum(right[-10:]),
                          "first10": len(right[:10]), "first10_right": sum(right[:10]),
-                         "by": by, "mixups": sorted(mixups.items(), key=lambda kv: -kv[1])[:3]})
+                         "by": by, "mixups": sorted(mixups.items(), key=lambda kv: -kv[1])[:3],
+                         "book": [{"sounded": a, "meaning": m, "times": n} for a, m, n in self.taught()[:12]]})
 
     def transcribe(self):
         """Ask Deepgram what it hears in one short recording. Only the page's opt-in switch sends sound here."""
@@ -456,6 +516,12 @@ class Handler(BaseHTTPRequestHandler):
             tmp.write_text(json.dumps(cfg), encoding="utf-8")
             os.replace(tmp, s.data / "config.json")
             s.config = cfg
+        number = "".join(ch for ch in cfg["contact"] if ch.isdigit() or ch == "+")
+        if s.send and number and "@" not in cfg["contact"]:  # wire the number in: register it with the texting service
+            def wire():
+                from hub.relay import register  # imported here: relay imports this module
+                s.line = register(number) or s.line
+            threading.Thread(target=wire, daemon=True).start()
         self.reply(200, cfg)
 
     def stream(self):

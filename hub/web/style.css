@@ -332,3 +332,7 @@ a { color: inherit; }
 @keyframes story-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .story.is-playing > * { opacity: 1; animation: none; } }
 .story.is-playing .s9 { animation-delay: 8.1s; } .story.is-playing .s10 { animation-delay: 9.3s; }
+
+/* The Epsilon mark: the letter itself, in a small round badge, beside the name on every page */
+.nav .wordmark { display: inline-flex; align-items: center; gap: 0.4em; }
+.nav .wordmark::before { content: "ε"; display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; border-radius: var(--radius-pill); background: var(--color-accent); color: var(--color-on-accent); font-family: var(--font-display); font-size: 1.05em; line-height: 1; padding-bottom: 0.12em; }

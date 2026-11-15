@@ -4,7 +4,7 @@ import { BANDS, fingerprint, match, wordIn } from "/static/sound-match.js";
 
 const $ = (id) => document.getElementById(id);
 const K = new URLSearchParams(location.search).get("k");
-const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
+const withKey = (url) => (K ? url + (url.includes("?") ? "&" : "?") + "k=" + encodeURIComponent(K) : url);
 if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"], a[href="/setup"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
 const SECONDS = 2.5, FRAME_MS = 40, KEEP = 12; // keep the newest 12 examples per meaning
@@ -158,6 +158,8 @@ function showStats(s) {
   if (s.total > 10) line += " When you started it was " + s.first10_right + " of the first " + s.first10 + ".";
   box.append(el("p", null, line));
   Object.entries(s.by || {}).forEach(([m, v]) => box.append(el("p", "quiet", label(m) + ": right " + v.right + " of " + v.tries)));
+  if ((s.book || []).length) box.append(el("p", null, "What Epsilon has learned so far:"));
+  (s.book || []).forEach((b) => box.append(el("p", "quiet", "“" + b.sounded + "” means " + label(b.meaning) + (b.times > 1 ? " (" + b.times + " times)" : ""))));
   (s.mixups || []).forEach(([pair, n]) => box.append(el("p", "quiet", "Mixed up " + n + (n === 1 ? " time: " : " times: ") + pair + ". Try teaching both again, a little more clearly apart.")));
 }
 
@@ -170,7 +172,10 @@ async function settle(guess, meaning, attempt, send) {
     votes[meaning] = (votes[meaning] || 0) + 1;
     save(HEARD, heardVotes);
   }
-  showStats(await post("/api/sound-log", { guess, meaning, score: attempt.score, heard: attempt.heard, sure: attempt.sure }));
+  await post("/api/sound-log", { guess, meaning, score: attempt.score, heard: attempt.heard, sure: attempt.sure });
+  // teaching: Gemini 4 Hydrogen listens to this recording and writes the sound into the family's sound book
+  if (attempt.clip) await post("/api/learn?meaning=" + encodeURIComponent(meaning), attempt.clip, true);
+  fetch(withKey("/api/sound-log")).then((r) => r.json()).then(showStats).catch(() => {});
   if (!send) { $("result-detail").textContent = "Thank you. Epsilon will remember that this sound means " + label(meaning) + ". Nothing was sent."; return; }
   // an emergency carries the person's own recording, so the parent hears it as it was said
   let own = null;
@@ -240,12 +245,14 @@ async function listen() {
     $("result-heard").textContent = "Gemini and Deepgram are listening…";
     const clip = await toWav(got.audio).catch(() => got.audio); // if the browser cannot convert it, send it as it is
     attempt.clip = clip;
+    attempt.sounded = "";
     const [d, g] = await Promise.all([post("/api/transcribe", clip, true), post("/api/guess", clip, true)]);
     if (latest !== attempt) return; // a newer try is on screen
+    attempt.sounded = (g.ok && g.heard) || "";  // how Gemini would spell the sound: saved when a person confirms
     // Gemini heard the recording itself: for speech that is unclear or said in the person's own way
     if (g.ok && g.word && g.word !== "unsure" && g.word in words && !(m.sure && m.meaning === g.word)) {
-      $("result-text").textContent = "Gemini thinks this may be: " + label(g.word);
-      $("result-detail").textContent = "It sounded like “" + (g.heard || "?") + "” (" + Math.round((g.confidence || 0) * 100) + "% sure). Say yes and Epsilon learns this sound for next time.";
+      $("result-text").textContent = "This may be: " + label(g.word);
+      $("result-detail").textContent = "Worked out by " + (g.by || "Gemini") + " from “" + (g.heard || "?") + "” (" + Math.round((g.confidence || 0) * 100) + "% sure). Say yes and Gemini 4 adds this sound to what Epsilon has learned.";
       const yes = el("button", "btn btn-primary", "Yes, send " + label(g.word));
       yes.type = "button";
       yes.onclick = () => settle(g.word, g.word, Object.assign(attempt, { sure: true, score: Math.round((g.confidence || 0) * 100) / 100 }), true);

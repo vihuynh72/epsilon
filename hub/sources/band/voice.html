@@ -17,7 +17,7 @@
   </nav>
   <main class="page page-narrow">
     <header class="app-head"><h1>Band voice</h1></header>
-    <p class="lede">Speak to the band. Epsilon listens through the band’s own microphone for five seconds and works out what was said.</p>
+    <p class="lede">Tap the band, then speak. Epsilon listens through the band’s own microphone for five seconds, works out the word, and sends it. Tap again for the next message.</p>
 
     <section class="panel" aria-labelledby="c-title">
       <h2 id="c-title">1. Connect the band</h2>
@@ -33,12 +33,13 @@
     </section>
 
     <section class="panel note" aria-labelledby="l-title">
-      <h2 id="l-title">2. Listen</h2>
+      <h2 id="l-title">2. Tap the band and speak</h2>
       <p class="quiet">The band’s light turns blue while its microphone is on. The recording goes to Google and Deepgram to be understood.</p>
       <div class="actions">
-        <button class="btn btn-primary" type="button" id="listen" disabled>Listen for 5 seconds</button>
+        <button class="btn btn-primary" type="button" id="listen" disabled>Listen now</button>
         <p class="form-msg" id="status" role="status"></p>
       </div>
+      <label class="check"><input type="checkbox" id="auto" checked><span>Send without asking when Gemini is sure and what Deepgram wrote agrees. The band flashes green when a message is sent, and amber when it is not.</span></label>
       <div class="result" id="result" hidden>
         <p class="msg-text" id="result-text"></p>
         <p class="quiet" id="result-detail"></p>
