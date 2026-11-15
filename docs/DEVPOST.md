@@ -26,7 +26,7 @@ One of our teammates has autistic siblings. Today they communicate with a tablet
 2. A page in Chrome reads the band's motion sensor over Bluetooth and matches each movement against the taught examples.
 3. A recognised word goes to our server. A Gemini decision model looks at the word, how sure the match was, the time, and recent messages. It chooses one of three actions: send a text, send an urgent voice message, or hold the message back. It gives its reason in one sentence. One rule is fixed in code: an urgent word is never held back. If the model is unavailable, simple rules decide.
 4. Texts go out as iMessages through Photon Spectrum. Voice messages are made with ElevenLabs.
-5. The parent's Messages page shows everything in real time.
+5. The parent's Messages page shows the conversation as chat bubbles in real time. A Set up page holds the words, the emergency words, and a live check that each service is connected.
 
 ## The part we care about most
 
@@ -50,7 +50,7 @@ A false message is a real harm. It puts words in the mouth of someone who cannot
 
 ## What is real and what is not
 
-- Real: gestures taught and recognised on the band page, words reaching the server, Gemini deciding in about a second, real iMessages and voice messages delivered to a phone, the live Messages page.
+- Real: gestures taught and recognised on the band page, words reaching the server, Gemini deciding in about a second, real iMessages and voice messages delivered to a phone, the live Messages page. A Sounds page where a family teaches a person's own sounds is built but has not been tried with a real wearer.
 - Not done: we have not measured gesture accuracy on a real wrist, and no autistic person has tested it.
 
 ## What is next
