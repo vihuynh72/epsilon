@@ -39,3 +39,6 @@ graphify-out/
 
 # Keep the kit's public-domain sample recording (used by the pretend band)
 !vexo-open-kit/dashboard/speech/sample-speech.opus
+
+# Built hosted page
+dist/

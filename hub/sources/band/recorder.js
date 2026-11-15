@@ -36,6 +36,7 @@ export class Recorder {
   /** Every raw sample from the band. */
   sample(s) {
     const row = [r1(s.t), r4(s.ax), r4(s.ay), r4(s.az), r1(s.gx ?? 0), r1(s.gy ?? 0), r1(s.gz ?? 0)];
+    if (this.ring.length && row[0] < this.ring.at(-1)[0]) this.ring = [];   // band time restarted (new connection)
     this.ring.push(row);
     while (this.ring.length && row[0] - this.ring[0][0] > RING_MS) this.ring.shift();
     if (this.fullLog) this.chunk.push(row);
@@ -60,7 +61,27 @@ export class Recorder {
     return id;
   }
 
+  /** Hosted without a server: keep a recording in memory for "Download data". */
+  keep(name, data) {
+    this.kept = (this.kept ?? []).concat([{ name, at: new Date().toISOString(), ...data }]).slice(-10);
+  }
+
+  /** Hosted without a server: everything recorded so far, as one file the viewer saves. */
+  download() {
+    const data = { session: SESSION, ...this.context(), events: [...(this.done ?? []), ...this.events], recordings: this.kept ?? [] };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    a.download = `epsilon-${SESSION}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
   async flush(leaving = false) {
+    if (this.offline) {                             // nothing to send to: keep the last 400 entries
+      this.done = (this.done ?? []).concat(this.events.splice(0)).slice(-400);
+      this.chunk = [];
+      return;
+    }
     const events = this.events.splice(0);
     const chunk = this.chunk.splice(0);
     const columns = ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'];

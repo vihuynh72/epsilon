@@ -156,3 +156,7 @@ pre { max-height: 240px; overflow: auto; font-size: 12px; line-height: 18px; bac
 .tile.untaught svg { color: var(--text-faint); }
 #card-icon svg { color: var(--word); }
 .word-card.unsure #card-icon svg, .word-card:not([style*="--word"]) #card-icon svg { color: var(--text-secondary); }
+
+/* Hosted: the band number and link choice sit in the connect card */
+.band-number, .band-link { display: block; margin: var(--gap-group) auto 0; font: inherit; font-size: var(--text-lg); text-align: center; width: 200px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); color: inherit; }
+.band-link { font-size: var(--text-body); margin-top: var(--gap-row); }

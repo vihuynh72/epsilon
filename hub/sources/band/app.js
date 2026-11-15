@@ -17,7 +17,11 @@ import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
 import { Recorder } from './recorder.js';
 import { icon } from './icons.js';
 
-const BAND = 44;                  // the team's band, Vexo-HACK-44. The only place the number is written.
+// Hosted without the server (e.g. on Vercel): no messaging; each person types their own band number.
+const info = await fetch('/api/info').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const HOSTED = !info;
+const savedBand = (() => { try { return Number(localStorage.getItem('epsilon-band')) || null; } catch { return null; } })();
+let BAND = HOSTED ? savedBand : 44;   // with the server: the team's band, Vexo-HACK-44
 const EXAMPLES = 3;               // tries per word while teaching
 const MAX_LEARNED = 4;            // examples per word picked up while in use
 const CONFIRM_MS = 1500;          // time to cancel before a word is sent
@@ -29,12 +33,28 @@ const STORE = 'epsilon-examples-v3';      // v3: movements relative to the weare
 const OLD_STORE = 'epsilon-examples-v2';  // its tap words carry over
 const TAP_STORE = 'epsilon-taps-v1';
 
-$('#number').value = String(BAND);
+$('#number').value = BAND ? String(BAND) : ($('#number').value || '');   // ?band= in the address also works
+// USB cable or Bluetooth (double-tap the band first), in the connect card
+if (!new URLSearchParams(location.search).get('link')) {
+  $('#link').hidden = false;
+  $('#link').removeAttribute('aria-hidden');
+  $('#link').className = 'band-link';
+  $('#link').querySelector('option[value="pretend"]').hidden = true;
+  $('#connect-view').insertBefore($('#link'), $('#connect'));
+}
+if (HOSTED) {
+  $('#number').type = 'text';
+  $('#number').placeholder = 'Band number';
+  $('#number').inputMode = 'numeric';
+  $('#number').className = 'band-number';
+  $('#connect-view').insertBefore($('#number'), $('#connect'));
+  $('#to-app-row').hidden = true;
+  $('#number').addEventListener('change', () => { try { localStorage.setItem('epsilon-band', $('#number').value.trim()); } catch { /* private window */ } });
+}
 $('#tolerance').value = '1';
 
-const info = await fetch('/api/info').then((r) => r.json()).catch(() => null);
-if (!info) say('The server is not running: start  python3 hub/server.py  and open http://localhost:8000/');
-const WORDS = info?.messages ?? [];
+const WORDS = info?.messages ?? (await fetch('./words.json').then((r) => r.json()).catch(() => []));
+if (!WORDS.length) say('No words: start the server with  python3 hub/server.py');
 const IDS = WORDS.map((w) => w.id);
 const word = (id) => WORDS.find((w) => w.id === id);
 $('#feed-url').textContent = info?.feed_url ?? '?';
@@ -83,6 +103,9 @@ const describe = (id) => (tapWords[id] ? `${tapWords[id]} tap${tapWords[id] > 1 
 load();
 const rec = new Recorder({ log: (l) => log(l), context: () => ({ band: BAND, taps: tapSettings, tolerance: tolerance(), words: Object.fromEntries(IDS.map((id) => [id, describe(id)])) }) });
 try { rec.fullLog = localStorage.getItem('epsilon-full-log') !== 'off'; } catch { /* private window */ }
+if (HOSTED) { rec.offline = true; rec.fullLog = false; }
+$('#download').hidden = !HOSTED;
+$('#download').onclick = () => rec.download();
 
 // --- state -----------------------------------------------------------------------------------
 const reader = new MotionReader(tapSettings ?? TAP_DEFAULTS);
@@ -158,20 +181,30 @@ const REFERENCE_STEPS = [
   ...MOVES.flatMap(([key, icon, title]) => [1, 2, 3].map((n) => ({ key: `${key}-${n}`, icon, title, hint: `${n} of 3. Then hold still.`, ready: 2000, ms: 2500 }))),
   { key: 'move', icon: '👋', title: 'Move around normally', hint: 'Like usual, no taps', ready: 1500, ms: 8000 },
 ];
+function stopCalibration() {
+  if (!calib) return;
+  clearTimeout(calib.timer);
+  clearInterval(calib.tick);
+  calib = null;
+}
 function startCalibration(then, steps = CALIB_STEPS, name = 'calibration') {
   cancel(false);
   stopTeaching();
+  teaching = null;                 // one mode at a time: calibration ends teaching
+  stopCalibration();               // and a calibration already running
+  clearTimeout(afterCalib);
+  sequence.reset();
   calib = { i: -1, raw: {}, steps, name, then, timer: null, tick: null, recording: false };
   view('calib');
   light(null);
   nextCalibStep();
 }
 function countdown(ms, text, kind, done) {
-  const until = Date.now() + ms;
-  const show = () => line($('#calib-phase'), text(Math.max(1, Math.ceil((until - Date.now()) / 1000))), kind);
+  const session = calib, until = Date.now() + ms;
+  const show = () => { if (calib === session) line($('#calib-phase'), text(Math.max(1, Math.ceil((until - Date.now()) / 1000))), kind); };
   show();
-  calib.tick = setInterval(show, 100);
-  calib.timer = setTimeout(() => { clearInterval(calib.tick); done(); }, ms);
+  session.tick = setInterval(show, 100);
+  session.timer = setTimeout(() => { clearInterval(session.tick); if (calib === session) done(); }, ms);
 }
 function nextCalibStep() {
   clearTimeout(calib.timer);
@@ -199,7 +232,7 @@ function nextCalibStep() {
   if (step.ready) { light(null); countdown(step.ready, (n) => `${n}`, 'wait', record); } else record();
 }
 function calibSample(sample) {
-  if (!calib.recording) return;
+  if (!calib.recording || !calib.raw[calib.step?.key]) return;
   const r4 = (x) => Math.round(x * 1e4) / 1e4, r1 = (x) => Math.round(x * 10) / 10;
   calib.raw[calib.step.key].push([Math.round(sample.t * 10) / 10, r4(sample.ax), r4(sample.ay), r4(sample.az), r1(sample.gx), r1(sample.gy), r1(sample.gz)]);
   const tap = calib.detector.feed(sample);
@@ -216,6 +249,7 @@ function endCalibStep() {
 }
 /** Send the raw recording to the server (saved in data/recordings/, never leaves this laptop). */
 function saveRecording(name, raw, settings) {
+  if (HOSTED) return rec.keep(name, { band: BAND, columns: ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'], steps: raw, settings });
   fetch(`/api/recording?name=${name}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
@@ -228,8 +262,13 @@ function finishCalibration() {
   log(`${calib.name} measured ${taps.slow} slow and ${taps.fast} fast taps`);
   const { then, name } = calib;
   calib = null;
-  write(TAP_STORE, settings);
-  useTapSettings(settings);
+  const felt = taps.slow + taps.fast;
+  if (felt >= 6 || !tapSettings) {
+    write(TAP_STORE, settings);
+    useTapSettings(settings);
+  } else {
+    log(`calibration felt only ${felt} taps: the earlier settings are kept`);
+  }
   saveRecording(name, raw, settings);
   rec.event({ kind: 'calibration', name, settings, warnings, taps });
   for (const w of warnings) log(`calibration: ${w}`);
@@ -240,16 +279,15 @@ function finishCalibration() {
   dots($('#calib-dots'), 0, 0);
   line($('#calib-phase'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
-  setTimeout(then, warnings.length ? 3500 : 1500);
+  afterCalib = setTimeout(() => { if (band && !calib && !teaching) then(); }, warnings.length ? 3500 : 1500);
 }
+let afterCalib = null;
 $('#calib-skip').onclick = () => {
   if (!calib) return;
-  if (calib.recording || calib.step) calib.raw[calib.step.key] ??= [];
+  if (calib.step) calib.raw[calib.step.key] ??= [];
   if (calib.name === 'reference') return endCalibStep();          // skip just this step
   const then = calib.then;
-  clearTimeout(calib.timer);
-  clearInterval(calib.tick);
-  calib = null;
+  stopCalibration();
   then();
 };
 $('#calibrate').onclick = () => band && startCalibration(() => use());
@@ -259,6 +297,9 @@ $('#reference').onclick = () => band && startCalibration(() => use(), REFERENCE_
 function teach(queue) {
   cancel(false);
   stopTeaching();
+  stopCalibration();               // one mode at a time: teaching ends calibration
+  clearTimeout(afterCalib);
+  sequence.reset();                // a tap from before must not fire a word afterwards
   teaching = { queue, i: 0, tries: [], phase: 'pause' };
   view('teach');
   beginWord();
@@ -480,7 +521,7 @@ function useTaps(n, times = []) {
 }
 function propose(id, shape, via, confidence) {
   const w = word(id);
-  pending = { id, shape, via, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape, confidence); }, CONFIRM_MS) };
+  pending = { id, shape, via, of: lastEvent, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape, confidence, p.of); }, CONFIRM_MS) };
   sequence.reset();
   card({ icon: id, title: w.label, hint: 'Tap twice to cancel', colour: w.colour, bar: true });
   tiles(id);
@@ -490,7 +531,7 @@ function cancel(tell = true) {
   if (!pending) return;
   clearTimeout(pending.timer);
   log(`cancelled ${pending.id}`);
-  rec.event({ kind: 'cancelled', of: lastEvent, word: pending.id });
+  rec.event({ kind: 'cancelled', of: pending.of, word: pending.id });
   pending = null;
   sequence.reset();
   if (tell) { card({ icon: '', title: 'Cancelled', state: 'unsure', back: 1500 }); tiles(); }
@@ -498,9 +539,24 @@ function cancel(tell = true) {
 }
 $('#cancel').onclick = () => cancel();
 
-async function send(id, via, shape = null, confidence = null) {
+let sends = 0;
+async function send(id, via, shape = null, confidence = null, of = lastEvent) {
   const w = word(id);
+  const mine = ++sends;
+  const current = () => mine === sends && !pending;     // nothing newer was proposed or sent meanwhile
   try {
+    if (HOSTED) {                                  // no server: the word is shown, not sent anywhere
+      log(`RECOGNISED ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})`);
+      rec.event({ kind: 'sent', of, word: id, via, confidence, forwarded: [] });
+      if (current()) {
+        card({ icon: id, title: w.label, hint: '', colour: w.colour, state: 'sent', back: 3000 });
+        light('#00ff00', { pattern: 'flash', period: 300 }, 1500);
+        tiles();
+      }
+      recent(w.label);
+      if (shape && $('#learn').checked) keep(id, shape);
+      return;
+    }
     const r = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
@@ -510,20 +566,24 @@ async function send(id, via, shape = null, confidence = null) {
     const answer = await r.json().catch(() => ({}));
     const out = answer.forwarded ?? [];
     const failed = out.filter((f) => !f.ok);
-    rec.event({ kind: 'sent', of: lastEvent, word: id, via, confidence, forwarded: out });
+    rec.event({ kind: 'sent', of, word: id, via, confidence, forwarded: out });
     log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})${out.map((f) => `  ${f.ok ? '→' : '✗'} ${f.to}${f.ok ? '' : ` (${f.error ?? f.status})`}`).join('')}`);
     const where = !out.length ? ''
       : failed.length ? `Couldn’t reach the app: ${failed[0].error ?? failed[0].status}` : 'Delivered';
-    card({ icon: id, title: w.label, hint: where, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
-    light(failed.length ? '#ff9f0a' : '#00ff00', { pattern: 'flash', period: 300 }, 1500);
+    if (current()) {
+      card({ icon: id, title: w.label, hint: where, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
+      light(failed.length ? '#ff9f0a' : '#00ff00', { pattern: 'flash', period: 300 }, 1500);
+    }
     recent(w.label);
     if (shape && $('#learn').checked) keep(id, shape);
   } catch (e) {
     log(`send failed ${id}: ${e.message}`);
-    card({ icon: '', title: `${w.label} not sent`, hint: 'Couldn’t reach the server on this laptop', state: 'unsure', back: 4000 });
-    light('#ff0000', { pattern: 'blink', period: 300 }, 1500);
+    if (current()) {
+      card({ icon: '', title: `${w.label} not sent`, hint: 'Couldn’t reach the server on this laptop', state: 'unsure', back: 4000 });
+      light('#ff0000', { pattern: 'blink', period: 300 }, 1500);
+    }
   }
-  tiles();
+  if (current()) tiles();
 }
 /** A sent, not cancelled movement becomes an extra example: the page gets used to the wearer. */
 function keep(id, shape) {
@@ -651,6 +711,7 @@ view('connect');
 
 onConnect(async (theBand, pretend) => {
   band = theBand;
+  if (HOSTED) BAND = band.number;                     // page.js connected only to the number typed
   band.on('motion', onSample);
   band.on('reconnecting', () => { reader.reset(); sequence.reset(); cancel(false); bandState('reconnecting'); });
   band.on('reconnected', () => { bandState('connected', true); widen(); if (teaching) beginWord(); else light(null); });
@@ -661,7 +722,8 @@ onConnect(async (theBand, pretend) => {
     cancel(false);
     stopTeaching();
     teaching = null;
-    if (calib) { clearTimeout(calib.timer); clearInterval(calib.tick); calib = null; }
+    stopCalibration();
+    clearTimeout(afterCalib);
     bandState('not connected');
     view('connect');
     $('#waves').hidden = true;
@@ -703,6 +765,7 @@ onConnect(async (theBand, pretend) => {
     }
   }
   await widen();
+  if (!band) return;                                 // dropped while setting up: the disconnect handler has it
   if (band.number !== BAND) {                        // Band.connect(44) already checks; belt and braces
     await band.disconnect();
     throw new Error(`That is band ${band.number}, not ${BAND}. Disconnected.`);

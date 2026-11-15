@@ -19,6 +19,7 @@ Other computers on the Wi-Fi reach only those three, and only with the key. Ever
 """
 import argparse
 import gzip
+import io
 import json
 import mimetypes
 import queue
@@ -147,10 +148,17 @@ class Handler(BaseHTTPRequestHandler):
     # --- who is asking ---------------------------------------------------------------
     def local(self):
         host = self.client_address[0]
-        return host in ("127.0.0.1", "::1") or host.startswith("::ffff:127.")
+        if not (host in ("127.0.0.1", "::1") or host.startswith("::ffff:127.")):
+            return False
+        # DNS rebinding: a website can point its own name at 127.0.0.1. Only accept this laptop's names.
+        name = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        return name in ("localhost", "127.0.0.1", "::1")
 
     def has_key(self, query):
-        return secrets.compare_digest(query.get("k", [""])[0], self.server.token)
+        try:
+            return secrets.compare_digest(query.get("k", [""])[0].encode(), self.server.token.encode())
+        except (TypeError, ValueError):
+            return False
 
     # --- answers ---------------------------------------------------------------------
     def send_bytes(self, code, body, kind):
@@ -285,7 +293,11 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         packed = "gzip" in self.headers.get("Content-Type", "")
         try:
-            text = gzip.decompress(body) if packed else body
+            if packed:
+                with gzip.GzipFile(fileobj=io.BytesIO(body)) as unpacked:   # bounded: a small bomb cannot fill memory
+                    text = unpacked.read(16 * MAX_RECORDING + 1)
+            else:
+                text = body
             if len(text) > 16 * MAX_RECORDING:
                 return self.send_text(400, "Bad size")
             json.loads(text)
@@ -330,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(400, "Bad request")
 
         if path == "/api/message" and self.local():
-            m = MESSAGES.get(body.get("id"))
+            m = MESSAGES.get(body.get("id")) if isinstance(body.get("id"), str) else None
             via = body.get("via")
             if m is None or via not in VIA:
                 return self.send_text(400, "Unknown word")
@@ -351,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ack" and (self.local() or self.cors):
             reply = body.get("reply")
             seq = body.get("seq")
-            if reply not in REPLIES or not isinstance(seq, int):
+            if not isinstance(reply, str) or reply not in REPLIES or not isinstance(seq, int):
                 return self.send_text(400, "Unknown reply")
             FEED.publish("ack", {"reply": reply, "text": REPLIES[reply], "seq": seq, "time": int(time.time() * 1000)})
             print(f"{time.strftime('%H:%M:%S')}  reply {REPLIES[reply]}", flush=True)

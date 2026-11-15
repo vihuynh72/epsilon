@@ -392,7 +392,7 @@ export class MotionReader {
     this.step = this.fusion.feed(step);
     const gesture = this.segmenter.feed(this.step);
     if (!gesture) return null;
-    if (tapsOnly(gesture, this.tapTimes, this.tapSettings.ringMs)) return null;   // the taps handle it
+    if (tapsOnly(gesture, this.tapTimes, this.tapSettings.ringMs, 300)) return null;   // the taps handle it (same slack as teaching)
     this.small = bigEnough(gesture);
     if (!this.small.ok) return null;                                             // a bump or a fidget, not a gesture
     this.small = null;
