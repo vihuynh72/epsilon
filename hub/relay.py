@@ -9,6 +9,7 @@ listens to the cloud hub and sends the texts.
 The phone number is the one saved in Set up on this laptop (data/config.json).
 """
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,8 +29,44 @@ def contact():
         return ""
 
 
+def cloud_contact(base, key):
+    """The phone number saved in Set up on the cloud hub, so whoever sets it up there gets the texts."""
+    try:
+        with urllib.request.urlopen("%s/api/state?k=%s" % (base, key), timeout=8) as r:
+            return json.load(r)["config"].get("contact", "")
+    except Exception:
+        return ""
+
+
+KNOWN = set()
+
+
+def register(number):
+    """A shared Photon line only texts people registered on the project: add a new number once.
+    The person must still send one iMessage to their assigned Epsilon number before texts can reach them."""
+    if number in KNOWN:
+        return
+    KNOWN.add(number)
+    env = (Path(__file__).resolve().parent.parent / "imessage" / ".env")
+    try:
+        project = next(l.split("=", 1)[1].strip() for l in env.read_text().splitlines() if l.startswith("PROJECT_ID="))
+        users = json.loads(subprocess.run(["npx", "-y", "@photon-ai/cli@legacy", "spectrum", "users", "list", "--project", project, "--json"],
+                                          capture_output=True, timeout=45).stdout)
+        users = users if isinstance(users, list) else next((v for v in users.values() if isinstance(v, list)), [])
+        mine = next((u for u in users if u.get("phoneNumber") == number), None)
+        if not mine:
+            subprocess.run(["npx", "-y", "@photon-ai/cli@legacy", "spectrum", "users", "add", "--phone", number, "--project", project],
+                           capture_output=True, timeout=45)
+            print("relay: registered the number ending %s with Photon. They must now send one iMessage to their "
+                  "Epsilon number (shown under Users in the Photon dashboard) before texts can reach them." % number[-2:], flush=True)
+    except Exception as e:
+        print("relay: could not register the number ending %s (%s)" % (number[-2:], type(e).__name__), flush=True)
+
+
 def deliver(base, key, event):
-    to = contact()
+    to = "".join(ch for ch in cloud_contact(base, key) if ch.isdigit() or ch == "+") or contact()
+    if to and event.get("action") != "held":
+        register(to)
     if event.get("action") == "held" or not to:
         print("relay: #%s %s not sent (%s)" % (event.get("id"), event.get("gesture"),
                                                "held back" if to else "no phone number in Set up"), flush=True)
