@@ -54,8 +54,16 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(decide(ev("hurt", conf=0.5), [], CFG)["action"], "held")
 
     def test_model_decides_first_and_its_reason_is_kept(self):
-        r = decide(ev(), [], CFG, lambda *a: ("held", "Looks accidental."))
+        r = decide(ev(conf=0.4), [], CFG, lambda *a: ("held", "Looks accidental."))
         self.assertEqual(r, {"action": "held", "reason": "Looks accidental.", "by": "model"})
+        r = decide(ev(), [sent(t=995)], CFG, lambda *a: ("held", "Just sent."))
+        self.assertEqual((r["action"], r["by"]), ("held", "model"))
+
+    def test_model_cannot_hold_a_clear_new_word(self):
+        # seen live: the model held a 95% "food" because an emergency had just gone out for another word
+        for conf in (0.95, None):
+            r = decide(ev("food", conf=conf), [sent("water", t=998, action="call")], CFG, lambda *a: ("held", "busy"))
+            self.assertEqual((r["action"], r["by"]), ("text", "rules"))
         self.assertEqual(decide(ev(), [], CFG, lambda *a: "call")["reason"], "Chosen by the decision model.")
 
     def test_model_is_asked_even_for_weak_and_repeated_gestures(self):

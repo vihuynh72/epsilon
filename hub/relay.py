@@ -16,6 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from hub.app import imessage
+from hub.voice import ring
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 
@@ -43,6 +44,10 @@ def deliver(base, key, event):
         except OSError as e:
             print("relay: could not fetch the recording (%s); sending the text only" % type(e).__name__, flush=True)
             clip = None
+    if audio.startswith("/audio/") and base.startswith("https://"):  # a real phone call, when Twilio is set up
+        number = "".join(ch for ch in to if ch.isdigit() or ch == "+")
+        if ring(number, base + audio):
+            print("relay: #%s phoning the parent" % event.get("id"), flush=True)
     ok = imessage(to, str(event.get("text", ""))[:300], clip)
     print("relay: #%s %s -> %s" % (event.get("id"), event.get("gesture"), "texted" if ok else "FAILED"), flush=True)
 

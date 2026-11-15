@@ -33,3 +33,28 @@ def speak(text, out_path):
     with open(out_path, "wb") as f:
         f.write(audio)
     return True
+
+
+# shortcut: written from Twilio's long-standing Calls API and never run (no Twilio account yet);
+# place one test call before relying on it.
+def ring(to, audio_url):
+    """Phone `to` and play the recording at `audio_url` twice. True if Twilio accepted the call.
+    Needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM (a Twilio number) in .env; without them, False."""
+    import base64
+    import urllib.parse
+    sid, token, sender = keys.get("TWILIO_ACCOUNT_SID"), keys.get("TWILIO_AUTH_TOKEN"), keys.get("TWILIO_FROM")
+    if not (sid and token and sender and to and audio_url.startswith("https://")):
+        return False
+    play = "<Play>%s</Play>" % audio_url.replace("&", "&amp;")
+    form = urllib.parse.urlencode({"To": to, "From": sender,
+                                   "Twiml": "<Response>%s<Pause length=\"1\"/>%s</Response>" % (play, play)}).encode()
+    req = urllib.request.Request("https://api.twilio.com/2010-04-01/Accounts/%s/Calls.json" % sid, data=form,
+                                 headers={"Authorization": "Basic " + base64.b64encode(("%s:%s" % (sid, token)).encode()).decode()})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        print("ring failed: HTTP %d" % e.code, flush=True)
+    except Exception as e:
+        print("ring failed: %s" % type(e).__name__, flush=True)
+    return False

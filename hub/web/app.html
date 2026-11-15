@@ -16,51 +16,29 @@
     <a class="wordmark" href="/">Epsilon</a>
     <a href="/app" aria-current="page">Messages</a>
     <a href="/sounds">Sounds</a>
+    <a href="/setup">Set up</a>
   </nav>
 
-  <main class="page">
+  <main class="page page-narrow">
     <header class="app-head">
       <h1>Messages</h1>
       <p class="status" id="live-status" data-live="false" role="status"><span class="dot" aria-hidden="true"></span><span id="live-label">Connecting…</span></p>
     </header>
 
-    <div class="app-grid">
-      <section aria-label="Messages, newest first">
-        <div class="empty" id="feed-empty">
-          <p class="msg-text">No messages yet.</p>
-          <p class="quiet">Use the buttons under “Send a test” to try one.</p>
-        </div>
-        <ol class="feed" id="feed" aria-live="polite"></ol>
-      </section>
-
-      <div class="settings" id="settings">
-        <form class="panel" id="config-form" novalidate>
-          <h2>Set up</h2>
-          <label class="field">Your phone number<input id="cfg-contact" name="contact" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 415 555 0100"></label>
-          <p class="quiet">Messages are texted to this number. Start with + and the country code.</p>
-          <label class="field">Your child’s name<input id="cfg-child" name="child" autocomplete="off"></label>
-          <details class="more">
-            <summary>Change what each gesture says</summary>
-            <div class="phrase-rows" id="phrase-rows"></div>
-            <div class="actions"><button class="btn" type="button" id="add-row">Add a gesture</button></div>
-          </details>
-          <div class="actions">
-            <button class="btn btn-primary" type="submit" id="save">Save</button>
-            <p class="form-msg warn" id="save-error" role="alert"></p>
-          </div>
-        </form>
-
-        <section class="panel" aria-labelledby="test-title">
-          <h2 id="test-title">Send a test</h2>
-          <p class="quiet">These buttons are for the demo. They act as if the band sent a gesture.</p>
-          <div class="actions" id="tests"></div>
-          <div class="actions">
-            <button class="btn" type="button" id="test-doubtful" disabled>Send a doubtful one</button>
-          </div>
-          <p class="form-msg warn" id="test-error" role="alert"></p>
-        </section>
+    <section class="insight-box" aria-label="Today">
+      <button class="btn" type="button" id="insight-btn">What does today look like?</button>
+      <div class="insight" id="insight" hidden aria-live="polite">
+        <p id="insight-summary"></p>
+        <p id="insight-tip"></p>
+        <p class="quiet insight-by" id="insight-by"></p>
       </div>
+    </section>
+
+    <div class="empty" id="feed-empty">
+      <p class="msg-text">No messages yet.</p>
+      <p class="quiet">When your child sends a word, it appears here. You can try one from <a href="/setup">Set up</a>.</p>
     </div>
+    <ol class="thread" id="feed" aria-live="polite" aria-label="Messages, oldest first"></ol>
   </main>
 </body>
 </html>

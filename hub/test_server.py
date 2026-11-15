@@ -85,6 +85,14 @@ class Token(HubCase):
         self.assertEqual(self.call("POST", "/gesture", {"gesture": "x"}, {"X-Epsilon-Token": "s3cret"})[0], 200)
         self.assertEqual(len(self.state()["events"]), 1)
 
+    def test_spoken_sentence_is_sent_as_it_is(self):
+        status, body = self.call("POST", "/gesture?k=s3cret", {"gesture": "spoken", "text": " I am cold. ", "via": "voice"})
+        self.assertEqual((status, body["event"]["text"], body["event"]["action"]), (200, "I am cold.", "text"))
+        self.assertEqual(self.call("POST", "/gesture?k=s3cret", {"gesture": "spoken", "text": "", "via": "voice"})[0], 400)
+        # free text is only honoured for confirmed speech: any other source still needs a known word
+        e = self.call("POST", "/gesture?k=s3cret", {"gesture": "spoken", "text": "hello", "via": "gesture"})[1]["event"]
+        self.assertEqual(e["action"], "held")
+
     def test_band_server_forward_shape(self):
         # what hub/server.py --forward posts: the word's id, milliseconds, and the token only in the address
         sent = {"id": "help", "label": "Help", "phrase": "I need help!", "urgent": True, "via": "gesture",

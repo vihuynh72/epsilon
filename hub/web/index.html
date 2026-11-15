@@ -15,49 +15,52 @@
 <body>
   <nav class="nav" aria-label="Main">
     <a class="wordmark" href="/" aria-current="page">Epsilon</a>
-    <a href="#how">How it works</a>
-    <a class="btn-primary" href="/app">Open messages</a>
+    <a href="/app">Messages</a>
+    <a href="/sounds">Sounds</a>
+    <a href="/setup">Set up</a>
   </nav>
 
   <main>
-    <section class="hero page">
-      <div class="hero-text">
-        <h1>One gesture. One message home.</h1>
-        <p>Epsilon lets a child who does not speak ask for water, a break, or help with a small wrist movement. The people who care for them get it as a plain message.</p>
+    <section class="intro page" aria-labelledby="intro-title">
+      <h1 id="intro-title">One gesture. One message home.</h1>
+      <p class="intro-lede">Epsilon is a wristband for a child who does not speak. They move their wrist, and their parent gets a text.</p>
+
+      <ol class="flow" aria-label="How it works">
+        <li>
+          <span class="flow-num" aria-hidden="true">1</span>
+          <h2>The child makes a gesture</h2>
+          <p class="quiet">One they taught the band: water, food, parents, sleep or help.</p>
+        </li>
+        <li>
+          <span class="flow-num" aria-hidden="true">2</span>
+          <h2>Epsilon checks it is sure</h2>
+          <p class="quiet">A decision model (Gemini, an AI) picks: send a text, send an urgent voice message, or wait if the match is doubtful.</p>
+        </li>
+        <li>
+          <span class="flow-num" aria-hidden="true">3</span>
+          <h2>The parent gets a message</h2>
+          <p class="quiet">An iMessage. Urgent words also come as a voice message.</p>
+        </li>
+      </ol>
+
+      <div class="intro-actions">
         <a class="btn btn-primary" href="/app">Open messages</a>
+        <a class="btn" href="/sounds">Teach a sound</a>
       </div>
+    </section>
+
+    <section class="pages page" aria-label="The two pages">
       <aside class="live-card" aria-label="Latest message" aria-live="polite">
         <p class="quiet meta">Latest message</p>
         <p class="latest-text" id="latest-text">No messages yet. Send a test from the messages page.</p>
         <p class="quiet meta nums" id="latest-meta"></p>
+        <p class="meta">Every message shows on the <a href="/app">Messages page</a>, with the reason it was sent or held back.</p>
       </aside>
-    </section>
-
-    <section class="how page" id="how">
-      <h2>How it works</h2>
-      <ol class="steps">
-        <li>
-          <span class="numeral" aria-hidden="true">1</span>
-          <div class="step-body">
-            <h3>The gesture</h3>
-            <p>The wearer makes a wrist movement they were taught. The band recognises it.</p>
-          </div>
-        </li>
-        <li>
-          <span class="numeral" aria-hidden="true">2</span>
-          <div class="step-body">
-            <h3>The message</h3>
-            <p>Each gesture maps to a sentence the family wrote. Software picks the sentence. It never invents one.</p>
-          </div>
-        </li>
-        <li>
-          <span class="numeral" aria-hidden="true">3</span>
-          <div class="step-body">
-            <h3>The check</h3>
-            <p>A weak or doubtful match is held back, so parents are not sent messages their child did not mean.</p>
-          </div>
-        </li>
-      </ol>
+      <div class="side-card">
+        <h2>Sounds</h2>
+        <p>A family can teach Epsilon a person's own sounds. It only says what a sound may mean, and a person confirms.</p>
+        <a class="btn" href="/sounds">Teach a sound</a>
+      </div>
     </section>
 
     <section class="band">

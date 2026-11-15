@@ -38,6 +38,8 @@
   --radius-input: 10px;
   --radius-card: 18px;
   --radius-pill: 999px;
+  --radius-bubble: 20px;
+  --radius-tail: 6px;
   --rule-hair: 1px;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
