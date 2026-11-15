@@ -311,13 +311,21 @@ class Handler(BaseHTTPRequestHandler):
         else:  # a word nobody wrote a sentence for is never sent to a parent
             event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")
         event["ms"] = round((time.time() - started) * 1000)  # how long the decision took
+        if event["action"] == "call":  # tell the parent what happened, so they are not left guessing
+            at = time.strftime("%I:%M %p", time.localtime(event["time"])).lstrip("0").lower()
+            how = {"gesture": "a wrist gesture", "taps": "taps on the band", "sound": "their own sound",
+                   "voice": "their voice", "button": "a test button"}.get(event["via"], "the band")
+            event["note"] = "Emergency. Sent at %s with %s.%s" % (
+                at, how, " The match was %d%%." % round(c * 100) if num(c) else "")
         if event["action"] == "call" and s.speak:
             name = "%d.mp3" % (time.time() * 1000)
-            if s.speak("A message from %s: %s" % (cfg["child"] or "your child", event["text"]), s.data / "audio" / name):
+            said = "Emergency message from %s. %s Sent at %s with %s." % (cfg["child"] or "your child", event["text"], at, how)
+            if s.speak(said, s.data / "audio" / name):
                 event["audio"] = "/audio/" + name
         if event["action"] != "held" and s.send and event["to"]:
             clip = s.data / "audio" / event["audio"][7:] if event["audio"] else None
-            event["delivery"] = "sent" if s.send(event["to"], event["text"], clip) else "failed"
+            words = event["text"] + ("\n" + event["note"] if event.get("note") else "")
+            event["delivery"] = "sent" if s.send(event["to"], words, clip) else "failed"
         with s.lock:
             event = dict(event, id=s.next_id)
             line = json.dumps(event)

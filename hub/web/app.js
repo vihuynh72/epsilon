@@ -43,6 +43,7 @@
     const parts = [cap1(e.gesture) + (how ? " " + how : "")];
     if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "% match");
     if (e.delivery === "sent" && e.to) parts.push("texted to " + who(e.to));
+    if (e.note) parts.push(e.note);
     if (e.reason) parts.push(e.reason);
     if (e.by) parts.push((e.by === "model" ? "Decided by Gemini" : "Decided by the fixed rules") + (typeof e.ms === "number" ? " in " + (e.ms / 1000).toFixed(1) + " s" : ""));
     return parts.join(" · ");

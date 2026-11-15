@@ -85,7 +85,8 @@ def deliver(base, key, event):
         number = "".join(ch for ch in to if ch.isdigit() or ch == "+")
         if ring(number, base + audio):
             print("relay: #%s phoning the parent" % event.get("id"), flush=True)
-    ok = imessage(to, str(event.get("text", ""))[:300], clip)
+    words = str(event.get("text", ""))[:300] + ("\n" + str(event["note"])[:200] if event.get("note") else "")
+    ok = imessage(to, words, clip)
     print("relay: #%s %s -> %s" % (event.get("id"), event.get("gesture"), "texted" if ok else "FAILED"), flush=True)
 
 
