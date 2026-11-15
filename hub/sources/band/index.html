@@ -34,13 +34,24 @@
     <button id="connect" class="primary">Connect band</button>
   </section>
 
+  <!-- 1b. Calibrate taps and movement (once) -->
+  <section id="calib-view" class="view" hidden>
+    <p class="step" id="calib-step"></p>
+    <div class="hero" id="calib-icon" aria-hidden="true"></div>
+    <h2 id="calib-title"></h2>
+    <p class="soft" id="calib-hint"></p>
+    <div class="dots" id="calib-dots"></div>
+    <p class="phase" id="calib-phase"></p>
+    <div class="actions"><button id="calib-skip" class="quiet">Skip</button></div>
+  </section>
+
   <!-- 2. Teach, one word at a time -->
   <section id="teach-view" class="view" hidden>
     <p class="step" id="teach-step"></p>
     <div class="hero" id="teach-icon" aria-hidden="true"></div>
     <h2 id="teach-title"></h2>
-    <p class="soft" id="teach-hint">Pause · do the gesture · pause</p>
     <div class="dots" id="teach-dots"></div>
+    <p class="phase" id="teach-phase"></p>
     <p class="note" id="teach-note" role="status"></p>
     <div class="actions">
       <button id="teach-redo" class="quiet">Start this word again</button>
@@ -62,23 +73,26 @@
     <ol id="recent" class="recent"></ol>
   </section>
 
+  <section id="waves" hidden>
+    <canvas id="picture" width="720" height="160"></canvas>
+    <p class="soft small center" id="wave-state">Live motion</p>
+  </section>
+
   <details id="more">
     <summary>Details</summary>
     <div class="pretend-only" hidden>
       <p class="small">Pretend band: <span id="light"></span> <span id="light-text">off</span></p>
       <p><span id="pretend-moves"></span>
-        <button id="pretend-tap" disabled>tap</button>
-        <button id="pretend-double" disabled>double-tap</button>
         <button id="pretend-drop" disabled>lose link</button></p>
     </div>
-    <p><label><input type="checkbox" id="tap-help" checked> 3 quick taps send Help</label></p>
+    <p><label><input type="checkbox" id="tap-help" checked> 3 taps send Help (if no word uses 3 taps)</label></p>
     <p><label><input type="checkbox" id="learn" checked> Keep learning from sent gestures</label></p>
     <p><label>Tolerance (1 = normal, lower = stricter) <input id="tolerance" type="number" step="0.1" min="0.3" max="3" size="4"></label></p>
     <p class="small">Feed for the guardian app: <code id="feed-url">?</code></p>
-    <canvas id="picture" width="720" height="180"></canvas>
     <pre id="log"></pre>
     <p class="actions">
       <button id="disconnect" class="quiet" disabled>Disconnect</button>
+      <button id="calibrate" class="quiet">Calibrate taps again</button>
       <button id="reset" class="quiet">Forget all gestures</button>
     </p>
   </details>
