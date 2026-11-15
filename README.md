@@ -4,7 +4,7 @@
 
 Epsilon is a wristband for a child who does not speak. They move their wrist, and their parent gets a text. For an emergency word, the parent also gets a voice message.
 
-Built in one day at VexoHacks (14 November 2026) by Vi, Arun, and Zach, on the Vexo Open event band.
+Built in one day at VexoHacks (14 November 2026) by Vi, Arun, and Zach.
 
 > A prototype. Not yet tested with autistic users. It does not read minds: only the wearer's own gesture sends a message.
 
@@ -21,10 +21,6 @@ A parent needs one thing: a phone that gets iMessages. There is no app to instal
 Done. When your child makes a gesture, you get the text. **Messages** shows the whole conversation.
 
 ## What happens to each gesture
-
-```
-gesture -> band page matches it -> Gemini decides -> text / voice message / held back -> Messages
-```
 
 | Gemini decides | You get |
 |---|---|
@@ -76,6 +72,5 @@ Tests: `python3 -m unittest hub.test_server hub.test_decide` and `node --test hu
 - A false message puts words in someone's mouth. When unsure, Epsilon stays quiet.
 - Stimming is never flagged, counted, or commented on.
 - It adds to the tablet or cards a person already uses. It never replaces them.
-- No keys or recordings in git. Nothing is stored on the band.
 
 More: [how the parts join](docs/PLAN.md) · [submission text](docs/DEVPOST.md) · [the sound idea and its research](docs/audioidea436.md)
