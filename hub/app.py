@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from hub.decide import decide, gemini_ask
 from hub.insight import summarise as summarise_day
 from hub.keys import get as get_key
-from hub.voice import speak
+from hub.voice import guess_word, speak
 
 WEB = Path(__file__).resolve().parent / "web"
 IMESSAGE = Path(__file__).resolve().parent.parent / "imessage"
@@ -177,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health", "/api/insight") and s.token and not (
+            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/guess", "/api/health", "/api/insight") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path in ("/events", "/api/events"):  # /api/events: the band page listens here
@@ -211,6 +211,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.insight()
             if method == "POST" and path == "/api/transcribe":
                 return self.transcribe()
+            if method == "POST" and path == "/api/guess":  # Gemini listens to one recording and suggests a word
+                raw = self.read_body(600_000)
+                found = guess_word(raw, self.headers.get("Content-Type", "audio/wav"), list(s.config["phrases"])) \
+                    if s.ask_model else None  # off in tests
+                return self.reply(200, dict({"ok": bool(found)}, **(found or {"error": "Gemini did not answer."})))
             if method == "GET" and path.startswith("/static/"):
                 return self.static(unquote(path[8:]))
             if method == "GET" and path.startswith("/audio/"):

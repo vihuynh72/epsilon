@@ -303,3 +303,15 @@ a { color: inherit; }
 .insight { background: var(--color-paper-2); border-radius: var(--radius-card); padding: var(--space-md); display: grid; gap: var(--space-sm); }
 .insight-by { font-size: var(--text-xs); }
 .note-top { margin-bottom: var(--space-lg); }
+
+/* Landing: what it is built with (two columns from 40rem, stacked on phones) */
+.built { display: grid; gap: var(--space-md); padding-block: var(--space-xl); }
+.built h2 { font-size: var(--text-xl); font-style: normal; }
+.built-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.built-list li { display: grid; gap: var(--space-xs); padding-block: var(--space-md); border-top: var(--rule-hair) solid var(--color-rule); }
+.built-list li:last-child { border-bottom: var(--rule-hair) solid var(--color-rule); }
+.built-name { font-weight: 500; }
+.built-what { color: var(--color-ink-2); min-width: 0; }
+@media (min-width: 40rem) {
+  .built-list li { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: var(--space-md); }
+}
