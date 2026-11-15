@@ -8,7 +8,7 @@
   // A hosted hub is opened as /app?k=KEY. Carry the key on every call and on links between our pages.
   const K = new URLSearchParams(location.search).get("k");
   const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
-  if (K) document.querySelectorAll('a[href="/"], a[href="/app"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
+  if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);

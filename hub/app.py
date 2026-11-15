@@ -1,10 +1,11 @@
 """Epsilon hub: gesture JSON in, parent message out, pushed live to the dashboard. Standard library only."""
-import hmac, json, os, queue, subprocess, threading, time
+import hmac, json, os, queue, subprocess, threading, time, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from hub.decide import decide, gemini_ask
+from hub.keys import get as get_key
 from hub.voice import speak
 
 WEB = Path(__file__).resolve().parent / "web"
@@ -17,6 +18,7 @@ WORDS = json.loads((Path(__file__).resolve().parent / "messages.json").read_text
 DEFAULT_CONFIG = {"child": "", "contact": "", "phrases": {w["id"]: w["phrase"] for w in WORDS}}
 URGENT = [w["id"] for w in WORDS if w.get("urgent")]
 LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+PAGES = {"/": "index.html", "/app": "app.html", "/sounds": "sounds.html"}
 KEEPALIVE = 15
 
 
@@ -143,7 +145,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/state") and s.token and not (
+            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path == "/events":
@@ -151,8 +153,12 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and path == "/api/state":
                 with s.lock:
                     return self.reply(200, {"config": s.config, "events": s.events[-100:][::-1]})
-            if method == "GET" and path in ("/", "/app"):
-                return self.static("index.html" if path == "/" else "app.html")
+            if method == "GET" and path in PAGES:
+                return self.static(PAGES[path])
+            if path == "/api/sound-log":
+                return self.sound_log(method)
+            if method == "POST" and path == "/api/transcribe":
+                return self.transcribe()
             if method == "GET" and path.startswith("/static/"):
                 return self.static(unquote(path[8:]))
             if method == "GET" and path.startswith("/audio/"):
@@ -217,6 +223,51 @@ class Handler(BaseHTTPRequestHandler):
                 except queue.Full:
                     pass  # a stuck dashboard drops events rather than slowing the hub
         self.reply(200, {"ok": True, "event": event})
+
+    def sound_log(self, method):
+        """Each sound the page tried: what it guessed and what a person said it was. This is how we see it improve."""
+        s, log = self.server, self.server.data / "sounds.jsonl"
+        if method == "POST":
+            b = parse_obj(self.read_body(2048))
+            guess, meaning, score, heard = b.get("guess"), b.get("meaning"), b.get("score"), b.get("heard", "")
+            if not isinstance(meaning, str) or not 1 <= len(meaning) <= 40:
+                raise Bad(400, "meaning must be text of 1 to 40 characters.")
+            if guess is not None and (not isinstance(guess, str) or len(guess) > 40):
+                raise Bad(400, "guess must be text of at most 40 characters, or null.")
+            if not num(score) or not isinstance(heard, str) or len(heard) > 200:
+                raise Bad(400, "score must be a number and heard must be text of at most 200 characters.")
+            row = {"time": time.time(), "guess": guess, "meaning": meaning, "score": score, "heard": heard,
+                   "sure": b.get("sure") is True}
+            with s.lock, open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        rows = []
+        if log.exists():
+            for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass
+        right = [r.get("sure") is True and r.get("guess") == r.get("meaning") for r in rows]
+        self.reply(200, {"ok": True, "total": len(rows), "right": sum(right),
+                         "last10": len(right[-10:]), "last10_right": sum(right[-10:])})
+
+    def transcribe(self):
+        """Ask Deepgram what it hears in one short recording. Only the page's opt-in switch sends sound here."""
+        raw = self.read_body(600_000)
+        key = get_key("DEEPGRAM_API_KEY")
+        if not key or not raw:
+            return self.reply(200, {"ok": False, "text": "", "error": "No Deepgram key on the hub."})
+        req = urllib.request.Request(  # mip_opt_out: Deepgram must not keep this sound to train its models
+            "https://api.deepgram.com/v1/listen?model=nova-3&filler_words=true&mip_opt_out=true", data=raw,
+            headers={"Authorization": "Token " + key, "Content-Type": self.headers.get("Content-Type", "audio/webm")})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                text = json.load(r)["results"]["channels"][0]["alternatives"][0]["transcript"]
+        except urllib.error.HTTPError as e:
+            return self.reply(200, {"ok": False, "text": "", "error": "Deepgram said no (%d)." % e.code})
+        except Exception as e:
+            return self.reply(200, {"ok": False, "text": "", "error": "Deepgram did not answer (%s)." % type(e).__name__})
+        self.reply(200, {"ok": True, "text": str(text)[:200]})
 
     def config(self):
         s, raw = self.server, self.read_body(16384)
