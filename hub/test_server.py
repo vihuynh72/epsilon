@@ -128,6 +128,18 @@ class Token(HubCase):
         words = {w["id"]: w for w in self.call("GET", "/api/info")[1]["messages"]}
         self.assertEqual((words["hug"]["label"], words["hug"]["phrase"], words["help"]["urgent"]), ("Hug", "I want a hug.", True))
 
+    def test_an_emergency_by_voice_carries_the_persons_own_recording(self):
+        k = {"X-Epsilon-Token": "s3cret", "Content-Type": "audio/wav"}
+        clip = self.call("POST", "/api/clip", b"RIFFfake", k)[1]["audio"]
+        e = self.call("POST", "/gesture?k=s3cret", {"gesture": "help", "via": "sound", "audio": clip})[1]["event"]
+        self.assertEqual((e["action"], e["audio"]), ("call", clip))
+        self.assertEqual(self.call("GET", clip)[0], 200)
+        # an ordinary word never carries a recording, and a made-up path is ignored
+        e = self.call("POST", "/gesture?k=s3cret", {"gesture": "water", "via": "sound", "audio": clip})[1]["event"]
+        self.assertIsNone(e["audio"])
+        e = self.call("POST", "/gesture?k=s3cret", {"gesture": "help", "via": "sound", "audio": "/audio/../config.json"})[1]["event"]
+        self.assertIsNone(e["audio"])
+
     def test_band_server_forward_shape(self):
         # what hub/server.py --forward posts: the word's id, milliseconds, and the token only in the address
         sent = {"id": "help", "label": "Help", "phrase": "I need help!", "urgent": True, "via": "gesture",

@@ -15,6 +15,7 @@ const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(va
 let examples = load(STORE, []);   // [{meaning, print}]
 let heardVotes = load(HEARD, {}); // what Deepgram wrote -> {meaning: times a person confirmed it}
 let words = {};                   // meaning -> the sentence it sends
+let urgentWords = [];             // the family's emergency words
 let busy = false;
 let latest = null;                // the try on screen
 
@@ -171,7 +172,10 @@ async function settle(guess, meaning, attempt, send) {
   }
   showStats(await post("/api/sound-log", { guess, meaning, score: attempt.score, heard: attempt.heard, sure: attempt.sure }));
   if (!send) { $("result-detail").textContent = "Thank you. Epsilon will remember that this sound means " + label(meaning) + ". Nothing was sent."; return; }
-  const sent = await post("/gesture", { gesture: meaning, confidence: attempt.score, via: "sound" });
+  // an emergency carries the person's own recording, so the parent hears it as it was said
+  let own = null;
+  if (attempt.clip && urgentWords.includes(meaning)) own = (await post("/api/clip", attempt.clip, true)).audio || null;
+  const sent = await post("/gesture", { gesture: meaning, confidence: attempt.score, via: "sound", audio: own });
   const e = sent.event || {};
   $("result-detail").textContent = !sent.ok ? (sent.error || "Could not send.")
     : e.action === "held" ? "Not sent. " + (e.reason || "It was held back.")
@@ -235,6 +239,7 @@ async function listen() {
   if (got.audio) {
     $("result-heard").textContent = "Gemini and Deepgram are listening…";
     const clip = await toWav(got.audio).catch(() => got.audio); // if the browser cannot convert it, send it as it is
+    attempt.clip = clip;
     const [d, g] = await Promise.all([post("/api/transcribe", clip, true), post("/api/guess", clip, true)]);
     if (latest !== attempt) return; // a newer try is on screen
     // Gemini heard the recording itself: for speech that is unclear or said in the person's own way
@@ -287,6 +292,7 @@ $("forget").onclick = () => {
 
 fetch(withKey("/api/state"), { cache: "no-store" }).then((r) => r.json()).then((s) => {
   words = (s.config && s.config.phrases) || {};
+  urgentWords = s.urgent || [];
   renderTeach();
 }).catch(() => { $("teach-error").textContent = "Could not load the list of meanings from the hub."; });
 fetch(withKey("/api/sound-log")).then((r) => r.json()).then(showStats).catch(() => {});

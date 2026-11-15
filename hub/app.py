@@ -13,7 +13,7 @@ WEB = Path(__file__).resolve().parent / "web"
 IMESSAGE = Path(__file__).resolve().parent.parent / "imessage"
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
-         ".png": "image/png", ".woff2": "font/woff2", ".mp3": "audio/mpeg",
+         ".png": "image/png", ".woff2": "font/woff2", ".mp3": "audio/mpeg", ".wav": "audio/wav",
          ".json": "application/json", ".mjs": "text/javascript; charset=utf-8"}
 # one word list for the band page (hub/server.py) and this app, so the two cannot drift apart
 WORDS = json.loads((Path(__file__).resolve().parent / "messages.json").read_text(encoding="utf-8"))
@@ -187,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/guess", "/api/health", "/api/insight") and s.token and not (
+            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/guess", "/api/clip", "/api/health", "/api/insight") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path in ("/events", "/api/events"):  # /api/events: the band page listens here
@@ -227,6 +227,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.insight()
             if method == "POST" and path == "/api/transcribe":
                 return self.transcribe()
+            if method == "POST" and path == "/api/clip":  # the person's own voice, kept only to send with an emergency
+                raw = self.read_body(600_000)
+                if not raw:
+                    raise Bad(400, "No recording was sent.")
+                name = "own-%d.wav" % (time.time() * 1000)
+                (s.data / "audio").mkdir(parents=True, exist_ok=True)
+                (s.data / "audio" / name).write_bytes(raw)
+                return self.reply(200, {"ok": True, "audio": "/audio/" + name})
             if method == "POST" and path == "/api/guess":  # Gemini listens to one recording and suggests a word
                 raw = self.read_body(600_000)
                 found = guess_word(raw, self.headers.get("Content-Type", "audio/wav"), list(s.config["phrases"])) \
@@ -311,15 +319,23 @@ class Handler(BaseHTTPRequestHandler):
         else:  # a word nobody wrote a sentence for is never sent to a parent
             event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")
         event["ms"] = round((time.time() - started) * 1000)  # how long the decision took
+        at = time.strftime("%I:%M %p", time.localtime(event["time"])).lstrip("0").lower()
+        how = {"gesture": "a wrist gesture", "taps": "taps on the band", "sound": "their own sound",
+               "voice": "their voice", "button": "a test button"}.get(event["via"], "the band")
         if event["action"] == "call":  # tell the parent what happened, so they are not left guessing
-            at = time.strftime("%I:%M %p", time.localtime(event["time"])).lstrip("0").lower()
-            how = {"gesture": "a wrist gesture", "taps": "taps on the band", "sound": "their own sound",
-                   "voice": "their voice", "button": "a test button"}.get(event["via"], "the band")
             event["note"] = "Emergency. Sent at %s with %s.%s" % (
                 at, how, " The match was %d%%." % round(c * 100) if num(c) else "")
-        if event["action"] == "call" and s.speak:
+        # an emergency made by voice carries the person's own recording, so the parent hears how urgent it is
+        own = b.get("audio")
+        if event["action"] == "call" and isinstance(own, str) and own.startswith("/audio/own-") \
+                and "/" not in own[7:] and (s.data / "audio" / own[7:]).is_file():
+            event["audio"] = own
+            event["note"] += " The voice message is their own voice."
+        if event["action"] != "held" and s.speak and not event["audio"]:  # every sent message is also spoken
             name = "%d.mp3" % (time.time() * 1000)
-            said = "Emergency message from %s. %s Sent at %s with %s." % (cfg["child"] or "your child", event["text"], at, how)
+            who = cfg["child"] or "your child"
+            said = ("Emergency message from %s. %s Sent at %s with %s." % (who, event["text"], at, how)
+                    if event["action"] == "call" else "A message from %s. %s" % (who, event["text"]))
             if s.speak(said, s.data / "audio" / name):
                 event["audio"] = "/audio/" + name
         if event["action"] != "held" and s.send and event["to"]:

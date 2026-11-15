@@ -298,7 +298,7 @@
     box.replaceChildren(
       line(h.gemini, "Gemini is deciding (" + h.model + "). It decided " + h.by_model + " of the last " + h.decided + " messages.", "Gemini is off. The fixed rules decide."),
       line(h.voice, "ElevenLabs makes the voice message for emergencies.", "No ElevenLabs key. Emergencies have no voice message."),
-      line(h.texting, "This computer sends the iMessage.", "This computer does not send texts itself. The relay laptop does."),
+      line(h.texting, "This computer sends the iMessage.", "Texts are sent by the team’s Mac, which listens to this site. Keep it switched on."),
       line(h.deepgram, "Deepgram can write down what it hears on the Sounds page.", "No Deepgram key."),
       line(h.calls, "Phone calls are on.", "Phone calls are off (no phone service connected)."),
     );
