@@ -16,6 +16,7 @@ let examples = load(STORE, []);   // [{meaning, print}]
 let heardVotes = load(HEARD, {}); // what Deepgram wrote -> {meaning: times a person confirmed it}
 let words = {};                   // meaning -> the sentence it sends
 let busy = false;
+let latest = null;                // the try on screen
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -28,7 +29,10 @@ const label = (m) => m.charAt(0).toUpperCase() + m.slice(1);
 /** Record once: loudness frames for the matcher, and the audio itself only if Deepgram is switched on. */
 async function record(wantAudio) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const ctx = new AudioContext();
+  let ctx;
+  try {
+  ctx = new AudioContext();
+  await ctx.resume();
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0;
@@ -54,9 +58,11 @@ async function record(wantAudio) {
   const stopped = recorder ? new Promise((done) => { recorder.onstop = done; }) : null;
   if (recorder) recorder.stop();
   await stopped;
-  stream.getTracks().forEach((t) => t.stop()); // the microphone is off again
-  await ctx.close();
   return { frames, audio: recorder ? new Blob(chunks, { type: recorder.mimeType }) : null };
+  } finally {
+    stream.getTracks().forEach((t) => t.stop()); // the microphone is off again, whatever happened
+    if (ctx) ctx.close();
+  }
 }
 
 async function capture(statusEl, wantAudio) {
@@ -118,12 +124,18 @@ async function post(url, body, raw) {
 }
 
 function showStats(s) {
-  if (!s || !s.total) { $("stats").textContent = ""; return; }
-  $("stats").textContent = "Right first time: " + s.last10_right + " of the last " + s.last10 + " tries (" + s.right + " of " + s.total + " in all).";
+  const box = $("stats");
+  box.replaceChildren();
+  if (!s || !s.total) { box.append(el("p", "quiet", "No tries yet. Each answer you give is kept here, so you can see it get better.")); return; }
+  let line = "Right first time: " + s.last10_right + " of the last " + s.last10 + " tries.";
+  if (s.total > 10) line += " When you started it was " + s.first10_right + " of the first " + s.first10 + ".";
+  box.append(el("p", null, line));
+  Object.entries(s.by || {}).forEach(([m, v]) => box.append(el("p", "quiet", label(m) + ": right " + v.right + " of " + v.tries)));
+  (s.mixups || []).forEach(([pair, n]) => box.append(el("p", "quiet", "Mixed up " + n + (n === 1 ? " time: " : " times: ") + pair + ". Try teaching both again, a little more clearly apart.")));
 }
 
-/** A person told us what the sound was. Learn from it, log it, and send it. */
-async function settle(guess, meaning, attempt) {
+/** A person told us what the sound was. Learn from it and log it. Only a confirmed match is sent. */
+async function settle(guess, meaning, attempt, send) {
   $("result-actions").replaceChildren();
   addExample(meaning, attempt.print);
   if (attempt.heard) {
@@ -132,8 +144,12 @@ async function settle(guess, meaning, attempt) {
     save(HEARD, heardVotes);
   }
   showStats(await post("/api/sound-log", { guess, meaning, score: attempt.score, heard: attempt.heard, sure: attempt.sure }));
-  const sent = await post("/gesture", { gesture: meaning, confidence: guess === meaning ? attempt.score : null, via: "sound" });
-  $("result-detail").textContent = sent.ok ? "Sent to Messages. Epsilon will remember this sound." : (sent.error || "Could not send.");
+  if (!send) { $("result-detail").textContent = "Thank you. Epsilon will remember that this sound means " + label(meaning) + ". Nothing was sent."; return; }
+  const sent = await post("/gesture", { gesture: meaning, confidence: attempt.score, via: "sound" });
+  const e = sent.event || {};
+  $("result-detail").textContent = !sent.ok ? (sent.error || "Could not send.")
+    : e.action === "held" ? "Not sent. " + (e.reason || "It was held back.")
+    : e.action === "call" ? "Sent as an urgent voice message." : "Sent to Messages.";
 }
 
 async function listen() {
@@ -146,23 +162,24 @@ async function listen() {
 
   const m = match(got.print, examples);
   const attempt = { print: got.print, score: Math.round(m.score * 100) / 100, sure: m.sure, heard: "" };
+  latest = attempt;
   $("result").hidden = false;
   $("result-heard").textContent = "";
   $("result-text").textContent = m.sure ? "This may mean: " + label(m.meaning) : "Not sure what that was.";
   $("result-detail").textContent = m.meaning
-    ? "Closest taught sound: " + label(m.meaning) + " (" + attempt.score.toFixed(2) + ", next best " + m.runnerUp.toFixed(2) + ")."
+    ? "Sounds most like " + label(m.meaning) + " (match " + Math.round(attempt.score * 100) + "%, next closest " + Math.round(m.runnerUp * 100) + "%)."
     : "No sounds are taught yet. Teach a few first.";
 
   const actions = $("result-actions");
   actions.replaceChildren();
-  const choice = (text, meaning, primary) => {
-    const b = el("button", "btn" + (primary ? " btn-primary" : ""), text);
+  const choice = (text, meaning, send) => {
+    const b = el("button", "btn" + (send ? " btn-primary" : ""), text);
     b.type = "button";
-    b.onclick = () => settle(m.sure ? m.meaning : null, meaning, attempt);
+    b.onclick = () => settle(m.sure ? m.meaning : null, meaning, attempt, send);
     actions.append(b);
   };
   if (m.sure) choice("Yes, send " + label(m.meaning), m.meaning, true);
-  Object.keys(words).filter((w) => !(m.sure && w === m.meaning)).forEach((w) => choice("It was " + label(w), w, false));
+  Object.keys(words).filter((w) => !(m.sure && w === m.meaning)).forEach((w) => choice("Teach: it was " + label(w), w, false));
   const none = el("button", "btn", "It was nothing");
   none.type = "button";
   none.onclick = () => { $("result").hidden = true; };
@@ -171,6 +188,7 @@ async function listen() {
   if (got.audio) {
     $("result-heard").textContent = "Asking Deepgram…";
     const d = await post("/api/transcribe", got.audio, true);
+    if (latest !== attempt) return; // a newer try is on screen
     attempt.heard = (d.text || "").trim().toLowerCase();
     const votes = heardVotes[attempt.heard];
     const learned = votes ? Object.entries(votes).sort((a, b) => b[1] - a[1])[0] : null;

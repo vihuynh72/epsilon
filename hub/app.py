@@ -68,8 +68,8 @@ def clean_config(b):
     if not isinstance(phrases, dict) or len(phrases) > 20:
         raise Bad(400, "phrases must be an object with at most 20 entries.")
     for k, v in phrases.items():
-        if not 0 < len(k) <= 40 or not isinstance(v, str) or len(v) > 120:
-            raise Bad(400, "Each phrase needs a gesture name of 1 to 40 characters and text of at most 120.")
+        if not 0 < len(k) <= 40 or not isinstance(v, str) or not 0 < len(v.strip()) <= 120:
+            raise Bad(400, "Each gesture needs a name of 1 to 40 characters and a sentence of 1 to 120.")
     out = {"child": child, "contact": contact, "phrases": dict(phrases)}
     th = (b.get("rules") or {}).get("threshold") if isinstance(b.get("rules") or {}, dict) else None
     if th is not None:
@@ -201,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
                  "to": cfg["contact"], "text": cfg["phrases"].get(g, "Gesture: " + g), "delivery": "logged",
                  "audio": None, "via": b.get("via") if isinstance(b.get("via"), str) else None}
         # decided outside the lock: the model and the voice call the network
-        event.update(decide(event, recent, dict(cfg, rules={"urgent": URGENT, **cfg.get("rules", {})}), s.ask_model))
+        if g in cfg["phrases"]:
+            event.update(decide(event, recent, dict(cfg, rules={"urgent": URGENT, **cfg.get("rules", {})}), s.ask_model))
+        else:  # a word nobody wrote a sentence for is never sent to a parent
+            event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")
         if event["action"] == "call" and s.speak:
             name = "%d.mp3" % (time.time() * 1000)
             if s.speak("A message from %s: %s" % (cfg["child"] or "your child", event["text"]), s.data / "audio" / name):
@@ -248,8 +251,18 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     pass
         right = [r.get("sure") is True and r.get("guess") == r.get("meaning") for r in rows]
+        by, mixups = {}, {}   # per meaning: how often the first guess was right, and what it was mistaken for
+        for r, ok in zip(rows, right):
+            m = by.setdefault(str(r.get("meaning"))[:40], {"tries": 0, "right": 0})
+            m["tries"] += 1
+            m["right"] += ok
+            if not ok and r.get("sure") is True and r.get("guess"):
+                pair = "%s heard as %s" % (str(r.get("meaning"))[:40], str(r["guess"])[:40])
+                mixups[pair] = mixups.get(pair, 0) + 1
         self.reply(200, {"ok": True, "total": len(rows), "right": sum(right),
-                         "last10": len(right[-10:]), "last10_right": sum(right[-10:])})
+                         "last10": len(right[-10:]), "last10_right": sum(right[-10:]),
+                         "first10": len(right[:10]), "first10_right": sum(right[:10]),
+                         "by": by, "mixups": sorted(mixups.items(), key=lambda kv: -kv[1])[:3]})
 
     def transcribe(self):
         """Ask Deepgram what it hears in one short recording. Only the page's opt-in switch sends sound here."""

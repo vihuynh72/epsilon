@@ -30,11 +30,11 @@
   function statusOf(e) {
     if (e.action === "held") return ["Held back" + (e.reason ? ": " + e.reason : ""), false];
     // when the decision model chose, show its own one-line reason: this is the decision log
-    const why = e.by === "model" && e.reason ? " · Gemini: " + e.reason : "";
+    const why = e.by === "model" && e.reason ? " · Why: " + e.reason : "";
     if (e.action === "call") return ["Urgent voice message" + why, false];
     if (e.delivery === "sent") return [(e.to ? "Texted to " + who(e.to) : "Texted") + why, false];
     if (e.delivery === "failed") return ["Could not send" + why, true];
-    return ["Logged" + why, false];
+    return ["Recorded here" + why, false];
   }
 
   function row(e) {
@@ -42,7 +42,8 @@
     li.dataset.id = e.id;
     li.append(el("p", "msg-text", e.text));
     const meta = el("p", "msg-meta");
-    const parts = [when(e.time), e.gesture];
+    const how = { gesture: "by gesture", taps: "by taps", sound: "by sound", button: "by button" }[e.via];
+    const parts = [when(e.time), how ? e.gesture + " " + how : e.gesture];
     if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "%");
     const [label, bad] = statusOf(e);
     meta.append(parts.join(" · ") + " · ", el("span", bad ? "warn" : "", label));

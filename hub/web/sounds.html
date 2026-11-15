@@ -24,6 +24,12 @@
     </header>
     <p class="lede">Some people have their own sound for a thing. Teach Epsilon a few examples, then let it listen. It only ever says what a sound <strong>may</strong> mean, and you decide.</p>
 
+    <ol class="steps-plain">
+      <li><strong>Teach.</strong> Record the sound for two meanings, three times each.</li>
+      <li><strong>Listen.</strong> Press Listen now and make one of the sounds.</li>
+      <li><strong>Answer.</strong> Tell it if it was right. It learns from every answer.</li>
+    </ol>
+
     <div class="app-grid">
       <section class="panel" aria-labelledby="try-title">
         <h2 id="try-title">Listen</h2>
@@ -40,7 +46,10 @@
           <div class="actions" id="result-actions"></div>
         </div>
 
-        <p class="quiet" id="stats" role="status"></p>
+        <div class="stats" role="status">
+          <h3>How it is doing</h3>
+          <div id="stats"></div>
+        </div>
 
         <label class="check">
           <input type="checkbox" id="use-deepgram">
@@ -58,6 +67,12 @@
         </div>
       </section>
     </div>
+
+    <section class="panel note" aria-labelledby="gesture-title">
+      <h2 id="gesture-title">Teaching a gesture</h2>
+      <p>Gestures are taught on the band page, on the computer the band is connected to. Open <a href="http://localhost:8000/">localhost:8000</a> there, connect the band, pick a word, and show the movement a few times.</p>
+      <p class="quiet">Sounds and gestures end up in the same place. Each one becomes a word, and the word goes to Messages.</p>
+    </section>
   </main>
 </body>
 </html>

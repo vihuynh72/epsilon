@@ -203,3 +203,50 @@ a { color: inherit; }
 .result { display: grid; gap: var(--space-sm); padding: var(--space-md); background: var(--color-paper); border-radius: var(--radius-input); }
 .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm); align-items: start; font-size: var(--text-sm); color: var(--color-ink-2); }
 .check input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* Landing: intro with a three-step flow (column on phones, row from 48rem) */
+.intro { display: grid; gap: var(--space-lg); justify-items: start; padding-block: var(--space-xl); }
+.intro h1 { font-size: 2.25rem; max-width: 20ch; }
+@media (min-width: 48rem) { .intro { gap: var(--space-xl); padding-block: var(--space-2xl) var(--space-xl); } }
+@media (min-width: 30rem) { .intro h1 { font-size: clamp(2.5rem, 1.2rem + 4vw, 4.5rem); } }
+.intro-lede { font-size: var(--text-lg); max-width: 34rem; }
+.flow { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-lg); width: 100%; }
+.flow li {
+  display: grid;
+  gap: var(--space-xs);
+  align-content: start;
+  min-width: 0;
+  padding: 0 0 0 var(--space-lg);
+  border-left: 2px solid var(--color-accent);
+}
+.flow-num {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.flow h2 { font-size: var(--text-xl); line-height: 1.1; }
+.flow p { font-size: var(--text-sm); max-width: 22rem; }
+@media (min-width: 48rem) {
+  .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-xl); }
+  .flow li { padding: var(--space-md) 0 0; border-left: 0; border-top: 2px solid var(--color-accent); }
+}
+.intro-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+
+/* Landing: latest message beside the Sounds card */
+.pages { display: grid; gap: var(--space-lg); padding-bottom: var(--space-xl); }
+.pages .live-card { padding: var(--space-lg); }
+.side-card { display: grid; gap: var(--space-md); justify-items: start; align-content: start; min-width: 0; padding: var(--space-lg); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-card); }
+@media (min-width: 48rem) { .pages { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
+.steps-plain { display: grid; gap: var(--space-xs); max-width: 40rem; margin: 0 0 var(--space-xl); padding-left: 1.25em; }
+.stats { display: grid; gap: var(--space-xs); padding-top: var(--space-md); border-top: var(--rule-hair) solid var(--color-rule); }
+.stats h3 { font-family: var(--font-body); font-size: var(--text-sm); font-weight: 600; }
+.stats p { font-size: var(--text-sm); }
+.note { margin-top: var(--space-xl); max-width: 40rem; }
+.note a { color: var(--color-accent); }
