@@ -53,23 +53,26 @@ class DecideTests(unittest.TestCase):
         # in decide() and update this test.
         self.assertEqual(decide(ev("hurt", conf=0.5), [], CFG)["action"], "held")
 
-    def test_model_can_escalate_or_hold(self):
-        self.assertEqual(decide(ev(), [], CFG, lambda *a: "call")["action"], "call")
-        r = decide(ev(), [], CFG, lambda *a: "held")
-        self.assertEqual((r["action"], r["reason"]), ("held", "Chosen by the decision model."))
+    def test_model_decides_first_and_its_reason_is_kept(self):
+        r = decide(ev(), [], CFG, lambda *a: ("held", "Looks accidental."))
+        self.assertEqual(r, {"action": "held", "reason": "Looks accidental.", "by": "model"})
+        self.assertEqual(decide(ev(), [], CFG, lambda *a: "call")["reason"], "Chosen by the decision model.")
 
-    def test_model_error_or_junk_keeps_text(self):
+    def test_model_is_asked_even_for_weak_and_repeated_gestures(self):
+        # DELIBERATE (team decision 2026-11-14): with a model present, the threshold is a hint to it, not a gate.
+        self.assertEqual(decide(ev(conf=0.1), [], CFG, lambda *a: ("text", "ok"))["action"], "text")
+        self.assertEqual(decide(ev(), [sent(t=999)], CFG, lambda *a: ("text", "ok"))["action"], "text")
+
+    def test_model_cannot_hold_an_urgent_word(self):
+        r = decide(ev("hurt"), [], CFG, lambda *a: ("held", "probably nothing"))
+        self.assertEqual((r["action"], r["by"]), ("call", "rules"))
+
+    def test_model_error_or_junk_falls_back_to_the_rules(self):
         def raises(*a):
             raise RuntimeError("x")
-        for ask in (raises, lambda *a: None, lambda *a: "banana"):
-            self.assertEqual(decide(ev(), [], CFG, ask)["action"], "text")
-
-    def test_model_not_called_for_held_or_urgent(self):
-        Boom.called = False
-        decide(ev(conf=0.1), [], CFG, Boom())
-        decide(ev(), [sent(t=999)], CFG, Boom())
-        decide(ev("hurt"), [], CFG, Boom())
-        self.assertFalse(Boom.called)
+        for ask in (raises, lambda *a: None, lambda *a: "banana", lambda *a: ("banana", "x")):
+            self.assertEqual(decide(ev(), [], CFG, ask), decide(ev(), [], CFG))
+            self.assertEqual(decide(ev(conf=0.1), [], CFG, ask)["action"], "held")
 
     def test_custom_threshold(self):
         cfg = {"rules": {"threshold": 0.95}}

@@ -26,10 +26,12 @@
 
   function statusOf(e) {
     if (e.action === "held") return ["Held back" + (e.reason ? ": " + e.reason : ""), false];
-    if (e.action === "call") return ["Urgent voice message", false];
-    if (e.delivery === "sent") return [e.to ? "Texted to " + e.to : "Texted", false];
-    if (e.delivery === "failed") return ["Could not send", true];
-    return ["Logged", false];
+    // when the decision model chose, show its own one-line reason: this is the decision log
+    const why = e.by === "model" && e.reason ? " · Gemini: " + e.reason : "";
+    if (e.action === "call") return ["Urgent voice message" + why, false];
+    if (e.delivery === "sent") return [(e.to ? "Texted to " + e.to : "Texted") + why, false];
+    if (e.delivery === "failed") return ["Could not send" + why, true];
+    return ["Logged" + why, false];
   }
 
   function row(e) {

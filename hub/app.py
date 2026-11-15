@@ -193,7 +193,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg, recent = s.config, [e for e in s.events[::-1][:20] if "action" in e]
         event = {"time": float(time.time() if t is None else t), "gesture": g, "confidence": c,
                  "to": cfg["contact"], "text": cfg["phrases"].get(g, "Gesture: " + g), "delivery": "logged",
-                 "audio": None}
+                 "audio": None, "via": b.get("via") if isinstance(b.get("via"), str) else None}
         # decided outside the lock: the model and the voice call the network
         event.update(decide(event, recent, dict(cfg, rules={"urgent": URGENT, **cfg.get("rules", {})}), s.ask_model))
         if event["action"] == "call" and s.speak:
