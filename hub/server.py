@@ -40,7 +40,7 @@ LAPTOP_ONLY = [HUB, ROOT / "vexo-open-kit"]             # served to this laptop 
 TOKEN_FILE = ROOT / "data" / "guardian-token"
 MESSAGES = {m["id"]: m for m in json.loads((HUB / "messages.json").read_text(encoding="utf-8"))}
 REPLIES = {"coming": "On my way", "ok": "Got it", "wait": "Wait a minute"}
-VIA = {"gesture", "taps", "button"}
+VIA = {"gesture", "taps", "button", "sound"}
 KEYED = ("/api/events", "/api/messages", "/api/ack")     # open to other devices that have the key
 MAX_BODY = 4096
 MAX_RECORDING = 8 * 1024 * 1024                      # a raw recording from the page

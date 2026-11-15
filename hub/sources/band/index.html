@@ -71,6 +71,7 @@
       <button id="cancel" class="quiet" hidden>Cancel</button>
     </div>
     <div class="tiles" id="tiles"></div>
+    <div class="actions"><button id="teach-sounds" class="quiet">Teach sounds</button></div>
     <ol id="recent" class="recent"></ol>
   </section>
 
@@ -80,6 +81,10 @@
   <label class="to-app" id="to-app-row">
     <input type="checkbox" id="to-app" role="switch">
     <span><b>Send to the guardian app</b> <span id="app-state" class="soft small"></span></span>
+  </label>
+  <label class="to-app" id="listen-row">
+    <input type="checkbox" id="listen" role="switch">
+    <span><b>Listen with the band’s microphone</b> <span class="soft small">The band’s light stays blue while on</span></span>
   </label>
   <section id="waves" hidden>
     <canvas id="picture" width="720" height="160"></canvas>
