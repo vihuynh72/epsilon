@@ -1,7 +1,8 @@
 """Decide what happens to one recognised gesture: hold it back, text the parent, or send an urgent voice message.
 
 The decision model goes first and sees the whole picture. The fixed rules below are the fallback when the
-model is missing, slow or wrong, plus one floor it cannot break: an urgent word is never held back.
+model is missing, slow or wrong, plus two floors it cannot break: an urgent word is never held back, and a
+clear, new word is never held back (the model may hold only a doubtful match or a real repeat).
 """
 import json
 import time
@@ -22,6 +23,9 @@ def decide(event, recent, config, ask_model=None):
     """Return {"action": "held" | "text" | "call", "reason": str, "by": "model" | "rules"}."""
     threshold, urgent, repeat_seconds = rules_of(config)
     gesture, conf = event["gesture"], event.get("confidence")
+    weak = isinstance(conf, (int, float)) and conf < threshold
+    repeat = any(r["gesture"] == gesture and r["action"] in ("text", "call") and event["time"] - r["time"] < repeat_seconds
+                 for r in recent)
 
     if ask_model:
         try:
@@ -31,8 +35,10 @@ def decide(event, recent, config, ask_model=None):
         if isinstance(answer, str):
             answer = (answer, "")
         if answer and answer[0] in ACTIONS:
-            if gesture in urgent and answer[0] == "held":   # the one thing the model may not do
+            if gesture in urgent and answer[0] == "held":   # floor 1: an urgent word is never held back
                 return {"action": "call", "reason": "Urgent words are never held back.", "by": "rules"}
+            if answer[0] == "held" and not (weak or repeat):   # floor 2: a clear, new word is never held back
+                return {"action": "text", "reason": "A clear, new word is always sent.", "by": "rules"}
             return {"action": answer[0], "reason": answer[1] or "Chosen by the decision model.", "by": "model"}
 
     if isinstance(conf, (int, float)) and conf < threshold:
