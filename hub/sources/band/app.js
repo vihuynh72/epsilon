@@ -16,6 +16,9 @@ import {
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
 import { Recorder } from './recorder.js';
 import { icon } from './icons.js';
+import { SoundFrames } from './sounds.js';
+import { fingerprint, match as matchSound } from './sound-match.js';
+import { BandAudio } from '../../../vexo-open-kit/js/src/index.js';
 
 // Hosted without the server (e.g. on Vercel): no messaging; each person types their own band number.
 const info = await fetch('/api/info').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -95,11 +98,16 @@ function load() {
   tapSettings = t && Object.keys(TAP_DEFAULTS).every((k) => Number.isFinite(t[k])) ? t : null;
 }
 const save = () => write(STORE, { taught, learned, tapWords });
+const SOUND_STORE = 'epsilon-sounds-v1';
+let sounds = (() => { const s = read(SOUND_STORE); return s && typeof s === 'object' ? s : {}; })();   // { id: [print, ...] }
+const saveSounds = () => write(SOUND_STORE, sounds);
+const soundExamples = (except = null) => Object.entries(sounds).filter(([id]) => id !== except && IDS.includes(id)).flatMap(([id, prints]) => prints.filter((p) => Array.isArray(p) && p.length === 160).map((print) => ({ meaning: id, print })));
 const movements = () => Object.fromEntries(IDS.filter((id) => !tapWords[id]).map((id) => [id, [...taught[id], ...learned[id]]]));
 const isTaught = (id) => taught[id].length > 0 || Boolean(tapWords[id]);
 const wordForTaps = (n) => IDS.find((id) => tapWords[id] === n);
 const tolerance = () => Number($('#tolerance').value) || 1;
-const describe = (id) => (tapWords[id] ? `${tapWords[id]} tap${tapWords[id] > 1 ? 's' : ''}` : isTaught(id) ? 'movement' : 'not taught');
+const describeMove = (id) => (tapWords[id] ? `${tapWords[id]} tap${tapWords[id] > 1 ? 's' : ''}` : isTaught(id) ? 'movement' : 'not taught');
+const describe = (id) => `${describeMove(id)}${sounds[id]?.length ? ' + sound' : ''}`;
 load();
 const rec = new Recorder({ log: (l) => log(l), context: () => ({ band: BAND, taps: tapSettings, tolerance: tolerance(), words: Object.fromEntries(IDS.map((id) => [id, describe(id)])) }) });
 try { rec.fullLog = localStorage.getItem('epsilon-full-log') !== 'off'; } catch { /* private window */ }
@@ -126,7 +134,7 @@ function view(name) {
   for (const v of ['connect', 'calib', 'teach', 'use']) $(`#${v}-view`).hidden = v !== name;
 }
 function light(colour, opts = {}, ms = 0, then = null) {
-  if (!band) return;
+  if (!band || mic.on) return;                     // the band keeps its light blue while the microphone is on
   clearTimeout(ledTimer);
   attempt(colour ? band.setLed(colour, opts) : band.ledOff());
   if (ms) ledTimer = setTimeout(() => (then ? then() : band && attempt(band.ledOff())), ms);
@@ -295,15 +303,65 @@ $('#calib-skip').onclick = () => {
 $('#calibrate').onclick = () => band && startCalibration(() => use());
 $('#reference').onclick = () => band && startCalibration(() => use(), REFERENCE_STEPS, 'reference');
 
+// --- the band's microphone: teaching sounds and listening for them -----------------------------
+// While it is on the band's light is solid blue (the kit's rule). Over Bluetooth the sound and
+// 416/s motion do not fit together, so motion drops to 208/s meanwhile.
+const mic = { on: false, busy: false, audio: null };
+const frames = new SoundFrames({
+  onFrame: (f, level) => { if (teaching?.kind === 'sound' && teaching.phase === 'go') teaching.frames.push(f); },
+  onSound: (f) => onSound(f),
+});
+const wantMic = () => Boolean(band) && (teaching?.kind === 'sound' || ($('#listen').checked && inUse()));
+async function updateMic() {
+  if (mic.busy || !band) return;
+  const want = wantMic();
+  if (want === mic.on) return;
+  mic.busy = true;
+  try {
+    const ble = $('#link').value === 'ble';
+    if (want) {
+      if (!mic.audio) mic.audio = new BandAudio((samples) => frames.push(samples));
+      if (ble) await band.configure({ motion: 208, sensors: 'both' });
+      await band.configure({ audio: true });
+      mic.on = true;
+      log(`microphone on${ble ? ' (motion 208/s over Bluetooth)' : ''}`);
+    } else {
+      mic.on = false;
+      await band.configure({ audio: false });
+      if (ble) await band.configure({ motion: 416, sensors: 'both' });
+      frames.reset();
+      log('microphone off');
+    }
+  } catch (e) {
+    log(`microphone: ${e.message}`);
+    if (want) { $('#listen').checked = false; mic.on = false; }
+  } finally {
+    mic.busy = false;
+    if (wantMic() !== mic.on) setTimeout(updateMic, 100);
+  }
+}
+$('#listen').onchange = () => { log(`listen for sounds: ${$('#listen').checked ? 'on' : 'off'}`); updateMic(); };
+function onSound(f) {
+  if (!inUse() || !$('#listen').checked || pending) return;
+  const print = fingerprint(f);
+  if (!print) return;
+  const got = matchSound(print, soundExamples());
+  log(`sound -> ${got.sure ? got.meaning : 'not sure'} (score ${got.score.toFixed(2)}, next ${got.runnerUp.toFixed(2)})`);
+  lastEvent = rec.event({ kind: 'sound', word: got.sure ? got.meaning : null, score: got.score, runnerUp: got.runnerUp, print });
+  if (got.sure) propose(got.meaning, null, 'sound', Math.min(1, got.score));
+}
+$('#teach-sounds').onclick = () => band && teach(IDS, 'sound');
+
 // --- 2. teach: one word at a time, on a timer --------------------------------------------------
-function teach(queue) {
+function teach(queue, kind = 'move') {
   cancel(false);
   stopTeaching();
   stopCalibration();               // one mode at a time: teaching ends calibration
   clearTimeout(afterCalib);
   sequence.reset();                // a tap from before must not fire a word afterwards
-  teaching = { queue, i: 0, tries: [], phase: 'pause' };
+  teaching = { queue, i: 0, tries: [], phase: 'pause', kind };
   view('teach');
+  updateMic();
   beginWord();
 }
 function stopTeaching() {
@@ -323,7 +381,7 @@ function drawTeach() {
   const w = word(teaching.queue[teaching.i]);
   $('#teach-step').textContent = teaching.queue.length > 1 ? `Word ${teaching.i + 1} of ${teaching.queue.length}` : 'Teach again';
   $('#teach-icon').replaceChildren(icon(w.id, 40));
-  $('#teach-title').textContent = w.label;
+  $('#teach-title').textContent = teaching.kind === 'sound' ? `${w.label}, the sound` : w.label;
   dots($('#teach-dots'), EXAMPLES, teaching.tries.length);
 }
 /** "Pause 3… 2… 1…", then go(). The light is off: nothing is recorded. */
@@ -338,10 +396,10 @@ function pause() {
 }
 /** "Go!": the light is white; everything the band does until it is still again is the try. */
 function go() {
-  Object.assign(teaching, { phase: 'go', capture: [], taps: [], moved: false, lastMove: 0, startedAt: Date.now() });
-  line($('#teach-phase'), 'Now', 'go');
+  Object.assign(teaching, { phase: 'go', capture: [], taps: [], frames: [], moved: false, lastMove: 0, startedAt: Date.now() });
+  line($('#teach-phase'), teaching.kind === 'sound' ? 'Now, the sound' : 'Now', 'go');
   light('#ffffff', { pattern: 'solid', brightness: 0.6 });
-  teaching.timer = setTimeout(timeUp, GO_MS);
+  teaching.timer = setTimeout(teaching.kind === 'sound' ? finishTry : timeUp, teaching.kind === 'sound' ? 3000 : GO_MS);
 }
 function timeUp() {
   // Taps still coming (slow taps): give them time, up to 3 s more.
@@ -354,7 +412,7 @@ function timeUp() {
   finishTry();
 }
 function teachStep(step) {
-  if (teaching.phase !== 'go') return;
+  if (teaching.phase !== 'go' || teaching.kind === 'sound') return;
   teaching.capture.push(step);
   if (isBusy(step)) { teaching.moved = true; teaching.lastMove = step.t; }
   const lastTap = teaching.taps.at(-1) ?? -Infinity;
@@ -362,7 +420,7 @@ function teachStep(step) {
   if (teaching.moved && step.t - teaching.lastMove >= DONE_QUIET_MS && tapsOver) finishTry();
 }
 function teachTap(tap) {
-  if (teaching.phase !== 'go') return;
+  if (teaching.phase !== 'go' || teaching.kind === 'sound') return;
   teaching.taps.push(tap.t);
   line($('#teach-phase'), `${'● '.repeat(teaching.taps.length).trim()}`, 'go');
 }
@@ -371,7 +429,14 @@ function finishTry() {
   clearTimeout(teaching.timer);
   teaching.phase = 'pause';
   let tryOut = null;
-  if (teaching.taps.length && tapsOnly(teaching.capture, teaching.taps, sequence.settings.ringMs, 300)) {
+  if (teaching.kind === 'sound') {
+    const print = fingerprint(teaching.frames);
+    if (!print) {
+      line($('#teach-note'), 'No sound heard. Try again, a little louder', 'bad');
+      return pause();
+    }
+    tryOut = { print };
+  } else if (teaching.taps.length && tapsOnly(teaching.capture, teaching.taps, sequence.settings.ringMs, 300)) {
     tryOut = { taps: teaching.taps.length };
   } else {
     const cut = cutWindow(teaching.capture);
@@ -394,7 +459,7 @@ function finishTry() {
   rec.event({ kind: 'teach-try', word: teaching.queue[teaching.i], taps: tryOut.taps ?? null, ms: tryOut.ms ?? null }, teaching.capture.length ? [teaching.capture[0].t, teaching.capture.at(-1).t] : null);
   teaching.tries.push(tryOut);
   drawTeach();
-  const what = tryOut.taps ? `${tryOut.taps} tap${tryOut.taps > 1 ? 's' : ''}` : 'a movement';
+  const what = tryOut.print ? 'the sound' : tryOut.taps ? `${tryOut.taps} tap${tryOut.taps > 1 ? 's' : ''}` : 'a movement';
   log(`  try ${teaching.tries.length}: ${tryOut.taps ? what : `movement, ${tryOut.ms} ms`}`);
   if (teaching.tries.length < EXAMPLES) {
     line($('#teach-note'), `${what[0].toUpperCase()}${what.slice(1)} recorded, ${EXAMPLES - teaching.tries.length} to go`, 'good');
@@ -415,6 +480,18 @@ function again(text) {
 function finishWord() {
   const id = teaching.queue[teaching.i];
   const tries = teaching.tries;
+  if (teaching.kind === 'sound') {
+    const others = soundExamples(id);
+    const clash = tries.map((t) => matchSound(t.print, others)).find((m) => m.sure);
+    if (clash) return again(`Too close to the sound for ${word(clash.meaning).label}. Use a different sound`);
+    sounds[id] = tries.map((t) => t.print);
+    saveSounds();
+    rec.event({ kind: 'teach-sound', word: id });
+    line($('#teach-phase'), 'Saved: the sound', 'go');
+    line($('#teach-note'), '');
+    teaching.timer = setTimeout(nextWord, 1100);
+    return;
+  }
   const tapTries = tries.filter((t) => t.taps);
   if (tapTries.length && tapTries.length < tries.length) return again('Mixed taps and movements. Repeat the same thing each time');
   if (tapTries.length) {
@@ -450,6 +527,7 @@ function nextWord() {
   if (teaching.i < teaching.queue.length) return beginWord();
   teaching = null;
   light(null);
+  updateMic();
   use();
 }
 $('#teach-redo').onclick = () => teaching && beginWord();
@@ -459,6 +537,7 @@ $('#teach-skip').onclick = () => nextWord();
 const READY = { icon: '', title: 'Ready', hint: '' };
 function use(hint = READY.hint) {
   view('use');
+  setTimeout(updateMic, 0);
   card({ ...READY, hint });
   tiles();
 }
@@ -716,9 +795,12 @@ onConnect(async (theBand, pretend) => {
   if (HOSTED) BAND = band.number;                     // page.js connected only to the number typed
   band.on('motion', onSample);
   band.on('reconnecting', () => { reader.reset(); sequence.reset(); cancel(false); bandState('reconnecting'); });
-  band.on('reconnected', () => { bandState('connected', true); widen(); if (teaching) beginWord(); else light(null); });
+  band.on('audio', (a) => mic.audio?.push(a));
+  band.on('reconnected', () => { bandState('connected', true); widen(); mic.audio?.restart(); mic.on = false; updateMic(); if (teaching) beginWord(); else light(null); });
   band.on('disconnect', () => {
     band = null;
+    mic.on = false;
+    frames.reset();
     reader.reset();
     sequence.reset();
     cancel(false);
