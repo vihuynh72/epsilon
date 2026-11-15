@@ -295,3 +295,7 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) { .chat.is-new { animation-duration: 120ms; } @keyframes chat-in { from { opacity: 0; } } }
 .setup { display: grid; gap: var(--space-lg); }
 @media (max-width: 420px) { .nav a { padding-inline: var(--space-sm); font-size: var(--text-sm); } }
+.health { display: grid; gap: var(--space-sm); }
+.health-line { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm); align-items: baseline; font-size: var(--text-sm); }
+.health-dot { width: 0.6rem; height: 0.6rem; border-radius: var(--radius-pill); background: var(--color-paper-3); border: var(--rule-hair) solid var(--color-ink-2); }
+.health-dot.is-on { background: var(--color-accent); border-color: var(--color-accent); }

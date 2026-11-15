@@ -44,6 +44,7 @@
     if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "% match");
     if (e.delivery === "sent" && e.to) parts.push("texted to " + who(e.to));
     if (e.reason) parts.push(e.reason);
+    if (e.by) parts.push((e.by === "model" ? "Decided by Gemini" : "Decided by the fixed rules") + (typeof e.ms === "number" ? " in " + (e.ms / 1000).toFixed(1) + " s" : ""));
     return parts.join(" · ");
   }
 
@@ -282,6 +283,39 @@
     };
     $("add-row").onclick = add;
     $("new-word").onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); add(); } };
+  }
+
+  // Set up: show which services this hub can really use, and let a person prove the decision model answers.
+  function showHealth(h) {
+    const box = $("health");
+    if (!box || !h || !h.ok) return;
+    const line = (on, yes, no) => {
+      const p = el("p", "health-line");
+      p.append(el("span", "health-dot" + (on ? " is-on" : ""), ""), el("span", null, on ? yes : no));
+      return p;
+    };
+    box.replaceChildren(
+      line(h.gemini, "Gemini is deciding (" + h.model + "). It decided " + h.by_model + " of the last " + h.decided + " messages.", "Gemini is off. The fixed rules decide."),
+      line(h.voice, "ElevenLabs makes the voice message for emergencies.", "No ElevenLabs key. Emergencies have no voice message."),
+      line(h.texting, "This computer sends the iMessage.", "This computer does not send texts itself. The relay laptop does."),
+      line(h.deepgram, "Deepgram can write down what it hears on the Sounds page.", "No Deepgram key."),
+      line(h.calls, "Phone calls are on.", "Phone calls are off (no phone service connected)."),
+    );
+    const c = h.check;
+    if (c) $("health-result").textContent = c.ok
+      ? "Gemini answered in " + (c.ms / 1000).toFixed(1) + " s: " + c.action + ". " + (c.reason || "")
+      : "Gemini did not answer (" + (c.ms / 1000).toFixed(1) + " s). The fixed rules would decide instead.";
+  }
+  if ($("health")) {
+    fetch(withKey("/api/health")).then((r) => r.json()).then(showHealth).catch(() => {});
+    $("health-check").onclick = async () => {
+      const b = $("health-check");
+      b.disabled = true;
+      $("health-result").textContent = "Asking Gemini…";
+      const res = await post("/api/health", {});
+      b.disabled = false;
+      if (res.error) $("health-result").textContent = res.error; else showHealth(res.data);
+    };
   }
 
   loadState(true).then(connect);

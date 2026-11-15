@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe") and s.token and not (
+            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path == "/events":
@@ -165,6 +165,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.static(PAGES[path])
             if path == "/api/sound-log":
                 return self.sound_log(method)
+            if path == "/api/health":
+                return self.health(method)
             if method == "POST" and path == "/api/transcribe":
                 return self.transcribe()
             if method == "GET" and path.startswith("/static/"):
@@ -209,10 +211,12 @@ class Handler(BaseHTTPRequestHandler):
                  "to": cfg["contact"], "text": cfg["phrases"].get(g, "Gesture: " + g), "delivery": "logged",
                  "audio": None, "via": b.get("via") if isinstance(b.get("via"), str) else None}
         # decided outside the lock: the model and the voice call the network
+        started = time.time()
         if g in cfg["phrases"]:
             event.update(decide(event, recent, dict(cfg, rules={"urgent": cfg.get("urgent", URGENT), **cfg.get("rules", {})}), s.ask_model))
         else:  # a word nobody wrote a sentence for is never sent to a parent
             event.update(action="held", reason="This word has no sentence yet, so nothing was sent.", by="rules")
+        event["ms"] = round((time.time() - started) * 1000)  # how long the decision took
         if event["action"] == "call" and s.speak:
             name = "%d.mp3" % (time.time() * 1000)
             if s.speak("A message from %s: %s" % (cfg["child"] or "your child", event["text"]), s.data / "audio" / name):
@@ -234,6 +238,30 @@ class Handler(BaseHTTPRequestHandler):
                 except queue.Full:
                     pass  # a stuck dashboard drops events rather than slowing the hub
         self.reply(200, {"ok": True, "event": event})
+
+    def health(self, method):
+        """Which outside services this hub can use, and proof that the decision model answers. Never shows a key."""
+        s = self.server
+        with s.lock:
+            decided = [e for e in s.events if "by" in e]
+            last = next((e for e in reversed(decided) if e["by"] == "model"), None)
+        out = {"ok": True,
+               "gemini": bool(s.ask_model) and bool(get_key("GEMINI_API_KEY")),
+               "model": get_key("GEMINI_MODEL") or "gemini-flash-lite-latest",
+               "voice": bool(get_key("ELEVENLABS_API_KEY")), "deepgram": bool(get_key("DEEPGRAM_API_KEY")),
+               "texting": bool(s.send), "calls": bool(get_key("TWILIO_ACCOUNT_SID")),
+               "decided": len(decided), "by_model": sum(e["by"] == "model" for e in decided),
+               "last": last and {k: last.get(k) for k in ("time", "gesture", "action", "reason", "ms")}}
+        if method == "POST" and s.ask_model:  # a real question to the model, right now
+            started = time.time()
+            sample = {"gesture": "water", "confidence": 0.93, "time": started, "text": "I want water, please.", "via": "check"}
+            try:
+                answer = s.ask_model(sample, [], {"rules": {"urgent": URGENT}})
+            except Exception:
+                answer = None
+            out["check"] = {"ok": bool(answer), "ms": round((time.time() - started) * 1000),
+                            "action": answer[0] if answer else None, "reason": answer[1] if answer else None}
+        self.reply(200, out)
 
     def sound_log(self, method):
         """Each sound the page tried: what it guessed and what a person said it was. This is how we see it improve."""
