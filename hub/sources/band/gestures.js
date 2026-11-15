@@ -344,7 +344,7 @@ export function calibrate({ still = [], slow = [], fast = [], move = [], more = 
   }
   const [slowTaps, fastTaps] = clusters;
   const all = clusters.flat();
-  if (slowTaps.length + fastTaps.length < 6) warnings.push(`I felt ${slowTaps.length + fastTaps.length} of your 10 taps. Tap a little firmer and try again.`);
+  if (slowTaps.length + fastTaps.length < 6) warnings.push(`${slowTaps.length + fastTaps.length} of 10 taps felt. Tap a little firmer and run it again`);
 
   const hits = all.map((c) => c.peak);
   const ring = all.flatMap((c) => c.ring);
@@ -359,7 +359,7 @@ export function calibrate({ still = [], slow = [], fast = [], move = [], more = 
     maxGapMs: clamp(slowGap * 1.4, 450, 1500) || TAP_DEFAULTS.maxGapMs,
     calmGyro: clamp(pct(all.map((c) => c.calmGyro), 0.9) * 5 + 30, 50, 200) || TAP_DEFAULTS.calmGyro,
   };
-  if (Number.isFinite(fastGap) && fastGap < settings.ringMs) warnings.push('Your fast taps are very fast: leave a little more room between them.');
+  if (Number.isFinite(fastGap) && fastGap < settings.ringMs) warnings.push('The fast taps run together. Leave a little more room between them');
   return { settings, warnings, taps: { slow: slowTaps.length, fast: fastTaps.length } };
 }
 

@@ -14,6 +14,7 @@ import {
   cutWindow, isBusy, tapsOnly, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
+import { Recorder } from './recorder.js';
 
 const BAND = 44;                  // the team's band, Vexo-HACK-44. The only place the number is written.
 const EXAMPLES = 3;               // tries per word while teaching
@@ -43,8 +44,8 @@ const appHosts = info?.forward_to ?? [];
 function showAppSwitch() {
   const on = $('#to-app').checked;
   $('#to-app-row').classList.toggle('on', on);
-  $('#app-state').textContent = !appHosts.length ? '(start the server with --forward to use this)'
-    : on ? `on: words go to ${appHosts.join(', ')}` : 'off: words stay on this laptop';
+  $('#app-state').textContent = !appHosts.length ? 'Start the server with --forward to use this'
+    : on ? `On, words go to ${appHosts.join(', ')}` : 'Off, words stay on this laptop';
 }
 $('#to-app').disabled = !appHosts.length;
 try { $('#to-app').checked = appHosts.length > 0 && localStorage.getItem(APP_STORE) === 'on'; } catch { /* private window */ }
@@ -79,6 +80,8 @@ const wordForTaps = (n) => IDS.find((id) => tapWords[id] === n);
 const tolerance = () => Number($('#tolerance').value) || 1;
 const describe = (id) => (tapWords[id] ? `${tapWords[id]} tap${tapWords[id] > 1 ? 's' : ''}` : isTaught(id) ? 'movement' : 'not taught');
 load();
+const rec = new Recorder({ log: (l) => log(l), context: () => ({ band: BAND, taps: tapSettings, tolerance: tolerance(), words: Object.fromEntries(IDS.map((id) => [id, describe(id)])) }) });
+try { rec.fullLog = localStorage.getItem('epsilon-full-log') !== 'off'; } catch { /* private window */ }
 
 // --- state -----------------------------------------------------------------------------------
 const reader = new MotionReader(tapSettings ?? TAP_DEFAULTS);
@@ -131,10 +134,10 @@ function line(el, text, kind = '') {
 // steps fill dots as taps are felt and end early once all were felt. Everything recorded is
 // saved to data/recordings/ on this laptop, so it can be studied and used as test data.
 const CALIB_STEPS = [
-  { key: 'still', icon: '✋', title: 'Hold the band still', hint: 'Rest your arm. Don’t move.', ms: 3000 },
+  { key: 'still', icon: '', title: 'Hold the band still', hint: 'Rest your arm', ms: 3000 },
   { key: 'slow', icon: '👆', title: 'Tap the band 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
   { key: 'fast', icon: '⚡', title: 'Now tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
-  { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like you normally would. No taps.', ms: 4000 },
+  { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like usual, no taps', ms: 4000 },
 ];
 const MOVES = [
   ['left', '⬅️', 'Move your hand to the left'], ['right', '➡️', 'Move your hand to the right'],
@@ -149,10 +152,10 @@ const REFERENCE_STEPS = [
   { key: 'hard', icon: '💥', title: 'Tap 5 times, hard', hint: 'A firm tap.', taps: 5, ms: 9000 },
   { key: 'slow', icon: '👆', title: 'Tap 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
   { key: 'fast', icon: '⚡', title: 'Tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
-  { key: 'pairs', icon: '✌️', title: 'Tap twice, pause. Three times.', hint: 'tap-tap … tap-tap … tap-tap', taps: 6, ms: 10000 },
-  { key: 'triples', icon: '🤟', title: 'Tap 3 times, pause. Three times.', hint: 'tap-tap-tap … tap-tap-tap …', taps: 9, ms: 12000 },
+  { key: 'pairs', icon: '✌️', title: 'Tap twice, pause. Three times.', hint: 'Two taps, a pause, three times over', taps: 6, ms: 10000 },
+  { key: 'triples', icon: '🤟', title: 'Tap 3 times, pause. Three times.', hint: 'Three taps, a pause, three times over', taps: 9, ms: 12000 },
   ...MOVES.flatMap(([key, icon, title]) => [1, 2, 3].map((n) => ({ key: `${key}-${n}`, icon, title, hint: `${n} of 3. Then hold still.`, ready: 2000, ms: 2500 }))),
-  { key: 'move', icon: '👋', title: 'Move around normally', hint: 'Like you usually would. No taps.', ready: 1500, ms: 8000 },
+  { key: 'move', icon: '👋', title: 'Move around normally', hint: 'Like usual, no taps', ready: 1500, ms: 8000 },
 ];
 function startCalibration(then, steps = CALIB_STEPS, name = 'calibration') {
   cancel(false);
@@ -190,9 +193,9 @@ function nextCalibStep() {
     calib.raw[step.key] = [];
     calib.recording = true;
     light('#ffffff', { pattern: 'solid', brightness: 0.4 });
-    countdown(step.ms, (n) => (step.ready ? `Go! ${n}` : `${n}`), step.ready ? 'go' : 'wait', endCalibStep);
+    countdown(step.ms, (n) => `${n}`, step.ready ? 'go' : 'wait', endCalibStep);
   };
-  if (step.ready) { light(null); countdown(step.ready, (n) => `Get ready… ${n}`, 'wait', record); } else record();
+  if (step.ready) { light(null); countdown(step.ready, (n) => `${n}`, 'wait', record); } else record();
 }
 function calibSample(sample) {
   if (!calib.recording) return;
@@ -227,11 +230,12 @@ function finishCalibration() {
   write(TAP_STORE, settings);
   useTapSettings(settings);
   saveRecording(name, raw, settings);
+  rec.event({ kind: 'calibration', name, settings, warnings, taps });
   for (const w of warnings) log(`calibration: ${w}`);
   $('#calib-step').textContent = '';
   $('#calib-icon').textContent = '✓';
-  $('#calib-title').textContent = name === 'reference' ? 'Recorded, thank you' : 'Calibrated';
-  $('#calib-hint').textContent = warnings[0] ?? 'The page knows your taps now.';
+  $('#calib-title').textContent = name === 'reference' ? 'Recorded' : 'Calibrated';
+  $('#calib-hint').textContent = warnings[0] ?? 'Taps are tuned to this wearer';
   dots($('#calib-dots'), 0, 0);
   line($('#calib-phase'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
@@ -275,14 +279,14 @@ function drawTeach() {
   const w = word(teaching.queue[teaching.i]);
   $('#teach-step').textContent = teaching.queue.length > 1 ? `Word ${teaching.i + 1} of ${teaching.queue.length}` : 'Teach again';
   $('#teach-icon').textContent = w.icon;
-  $('#teach-title').textContent = `Your gesture for “${w.label}”`;
+  $('#teach-title').textContent = w.label;
   dots($('#teach-dots'), EXAMPLES, teaching.tries.length);
 }
 /** "Pause 3… 2… 1…", then go(). The light is off: nothing is recorded. */
 function pause() {
   teaching.phase = 'pause';
   const until = Date.now() + PAUSE_MS;
-  const show = () => line($('#teach-phase'), `Pause… ${Math.max(1, Math.ceil((until - Date.now()) / 1000))}`, 'wait');
+  const show = () => line($('#teach-phase'), `${Math.max(1, Math.ceil((until - Date.now()) / 1000))}`, 'wait');
   show();
   light(null);
   teaching.tick = setInterval(show, 100);
@@ -291,7 +295,7 @@ function pause() {
 /** "Go!": the light is white; everything the band does until it is still again is the try. */
 function go() {
   Object.assign(teaching, { phase: 'go', capture: [], taps: [], moved: false, lastMove: 0, startedAt: Date.now() });
-  line($('#teach-phase'), teaching.tries.length ? 'Go! Same again' : 'Go!', 'go');
+  line($('#teach-phase'), 'Now', 'go');
   light('#ffffff', { pattern: 'solid', brightness: 0.6 });
   teaching.timer = setTimeout(timeUp, GO_MS);
 }
@@ -331,15 +335,16 @@ function finishTry() {
   }
   if (!tryOut) {
     log('  nothing');
-    line($('#teach-note'), 'I didn’t feel anything. Let’s try again.', 'bad');
+    line($('#teach-note'), 'No movement felt. Try again', 'bad');
     return pause();
   }
+  rec.event({ kind: 'teach-try', word: teaching.queue[teaching.i], taps: tryOut.taps ?? null, ms: tryOut.ms ?? null }, teaching.capture.length ? [teaching.capture[0].t, teaching.capture.at(-1).t] : null);
   teaching.tries.push(tryOut);
   drawTeach();
   const what = tryOut.taps ? `${tryOut.taps} tap${tryOut.taps > 1 ? 's' : ''}` : 'a movement';
   log(`  try ${teaching.tries.length}: ${tryOut.taps ? what : `movement, ${tryOut.ms} ms`}`);
   if (teaching.tries.length < EXAMPLES) {
-    line($('#teach-note'), `Got it: ${what}. ${EXAMPLES - teaching.tries.length} more.`, 'good');
+    line($('#teach-note'), `${what[0].toUpperCase()}${what.slice(1)} recorded, ${EXAMPLES - teaching.tries.length} to go`, 'good');
     light('#00ff00', { pattern: 'solid' }, 300);
     return pause();
   }
@@ -347,6 +352,7 @@ function finishTry() {
 }
 function again(text) {
   log(`  ${text}`);
+  rec.event({ kind: 'teach-redo', word: teaching.queue[teaching.i], reason: text });
   line($('#teach-note'), text, 'bad');
   teaching.tries = [];
   drawTeach();
@@ -357,13 +363,13 @@ function finishWord() {
   const id = teaching.queue[teaching.i];
   const tries = teaching.tries;
   const tapTries = tries.filter((t) => t.taps);
-  if (tapTries.length && tapTries.length < tries.length) return again('Some tries were taps and some were movements. Let’s do it again, the same way each time.');
+  if (tapTries.length && tapTries.length < tries.length) return again('Mixed taps and movements. Repeat the same thing each time');
   if (tapTries.length) {
     const counts = tapTries.map((t) => t.taps);
-    if (new Set(counts).size > 1) return again(`I counted ${counts.join(', ')} taps. Let’s do it again, the same number each time.`);
+    if (new Set(counts).size > 1) return again(`Counted ${counts.slice(0, -1).join(', ')} and ${counts.at(-1)} taps. Use the same number each time`);
     const n = counts[0];
     const other = IDS.find((o) => o !== id && tapWords[o] === n);
-    if (other) return again(`${n} taps is already “${word(other).label}”. Use a different number of taps.`);
+    if (other) return again(`${n} tap${n > 1 ? 's' : ''} already means ${word(other).label}. Use a different number`);
     tapWords[id] = n;
     taught[id] = [];
     learned[id] = [];
@@ -372,13 +378,14 @@ function finishWord() {
     const others = movements();
     delete others[id];
     const mixed = clashes(id, { ...others, [id]: shapes }, { tolerance: tolerance() }).filter((o) => others[o]?.length);
-    if (mixed.length) return again(`That’s too much like “${word(mixed[0]).label}”. Pick a different movement.`);
+    if (mixed.length) return again(`Too close to ${word(mixed[0]).label}. Use a different movement`);
     taught[id] = shapes;
     learned[id] = [];
     delete tapWords[id];
   }
   save();
-  line($('#teach-phase'), `Got it ✓ (${describe(id)})`, 'go');
+  rec.event({ kind: 'teach-word', word: id, as: describe(id) });
+  line($('#teach-phase'), `Saved: ${describe(id)}`, 'go');
   line($('#teach-note'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
   teaching.timer = setTimeout(nextWord, 1100);
@@ -390,13 +397,13 @@ function nextWord() {
   if (teaching.i < teaching.queue.length) return beginWord();
   teaching = null;
   light(null);
-  use(IDS.every(isTaught) ? 'All set. Make one of your gestures.' : undefined);
+  use(IDS.every(isTaught) ? 'All five words are taught' : undefined);
 }
 $('#teach-redo').onclick = () => teaching && beginWord();
 $('#teach-skip').onclick = () => nextWord();
 
 // --- 3. use ---------------------------------------------------------------------------------------
-const READY = { icon: '👋', title: 'Ready', hint: 'Make one of your gestures.' };
+const READY = { icon: '', title: 'Ready', hint: 'Make a gesture' };
 function use(hint = READY.hint) {
   view('use');
   card({ ...READY, hint });
@@ -433,8 +440,8 @@ function tiles(active = null) {
     icon.textContent = w.icon;
     const how = document.createElement('small');
     how.textContent = describe(w.id);
-    b.append(icon, w.label, how);
-    b.title = `Teach “${w.label}” again`;
+    b.append(w.label, how);
+    b.title = `Teach ${w.label} again`;
     b.onclick = () => band && teach([w.id]);
     b.disabled = !band;
     box.append(b);
@@ -442,29 +449,32 @@ function tiles(active = null) {
 }
 const inUse = () => !teaching && !calib && !$('#use-view').hidden;
 
+let lastSpan = null, lastEvent = null;
 function useGesture(shape) {
   if (pending) return;
   const got = classify(shape, movements(), { tolerance: tolerance() });
   const near = got.ranked.slice(0, 3).map((r) => `${r.id} ${r.score.toFixed(2)}`).join(', ');
   log(`movement -> ${got.id ?? `not sure (${got.reason})`}   [${near}]`);
+  lastEvent = rec.event({ kind: 'movement', word: got.id, reason: got.reason ?? null, confidence: got.id ? confidenceOf(got) : null, ranked: got.ranked.slice(0, 3) }, lastSpan);
   if (got.id) return propose(got.id, shape, 'gesture', confidenceOf(got));   // the app holds back below 0.8
   if (got.reason === 'none') return;
-  card({ icon: '🤔', title: 'Didn’t catch that', hint: 'Try again: pause, gesture, pause.', state: 'unsure', back: 2500 });
+  card({ icon: '', title: 'Not recognised', hint: 'Pause, then try again', state: 'unsure', back: 2500 });
   light(null);
 }
-function useTaps(n) {
+function useTaps(n, times = []) {
   if (pending) return;
   const id = wordForTaps(n);
+  lastEvent = rec.event({ kind: 'taps', count: n, times, word: id ?? null }, lastSpan);
   log(`${n} tap${n > 1 ? 's' : ''} -> ${id ?? (n === 3 && $('#tap-help').checked ? 'help (built in)' : 'no word')}`);
   if (id) return propose(id, null, 'taps', 1);            // a tap count is exact
   if (n === 3 && $('#tap-help').checked) return send('help', 'taps', null, 1);
-  card({ icon: '🤔', title: `${n} tap${n > 1 ? 's' : ''}`, hint: 'No word uses that many taps.', state: 'unsure', back: 2500 });
+  card({ icon: '', title: `${n} tap${n > 1 ? 's' : ''}`, hint: 'No word uses this many taps', state: 'unsure', back: 2500 });
 }
 function propose(id, shape, via, confidence) {
   const w = word(id);
   pending = { id, shape, via, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape, confidence); }, CONFIRM_MS) };
   sequence.reset();
-  card({ icon: w.icon, title: w.label, hint: 'Sending… tap twice to cancel.', colour: w.colour, bar: true });
+  card({ icon: '', title: w.label, hint: 'Tap twice to cancel', colour: w.colour, bar: true });
   tiles(id);
   light(w.colour, { pattern: 'solid' });
 }
@@ -472,9 +482,10 @@ function cancel(tell = true) {
   if (!pending) return;
   clearTimeout(pending.timer);
   log(`cancelled ${pending.id}`);
+  rec.event({ kind: 'cancelled', of: lastEvent, word: pending.id });
   pending = null;
   sequence.reset();
-  if (tell) { card({ icon: '✋', title: 'Cancelled', state: 'unsure', back: 1500 }); tiles(); }
+  if (tell) { card({ icon: '', title: 'Cancelled', state: 'unsure', back: 1500 }); tiles(); }
   light(null);
 }
 $('#cancel').onclick = () => cancel();
@@ -491,16 +502,17 @@ async function send(id, via, shape = null, confidence = null) {
     const answer = await r.json().catch(() => ({}));
     const out = answer.forwarded ?? [];
     const failed = out.filter((f) => !f.ok);
+    rec.event({ kind: 'sent', of: lastEvent, word: id, via, confidence, forwarded: out });
     log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})${out.map((f) => `  ${f.ok ? '→' : '✗'} ${f.to}${f.ok ? '' : ` (${f.error ?? f.status})`}`).join('')}`);
-    const where = !out.length ? 'Only on this laptop (the switch is off).'
-      : failed.length ? `The guardian app did not get it (${failed[0].error ?? failed[0].status}).` : 'Delivered to the guardian app.';
-    card({ icon: w.icon, title: `${w.label}: sent ✓`, hint: `“${w.phrase}” · ${where}`, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
+    const where = !out.length ? 'Kept on this laptop'
+      : failed.length ? `Couldn’t reach the guardian app: ${failed[0].error ?? failed[0].status}` : 'Delivered to the guardian app';
+    card({ icon: '', title: w.label, hint: where, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
     light(failed.length ? '#ff9f0a' : '#00ff00', { pattern: 'flash', period: 300 }, 1500);
-    recent(`${w.icon} ${w.label}`);
+    recent(w.label);
     if (shape && $('#learn').checked) keep(id, shape);
   } catch (e) {
     log(`send failed ${id}: ${e.message}`);
-    card({ icon: '⚠️', title: `${w.label}: not sent`, hint: 'Is the server still running?', state: 'unsure', back: 4000 });
+    card({ icon: '', title: `${w.label} not sent`, hint: 'Couldn’t reach the server on this laptop', state: 'unsure', back: 4000 });
     light('#ff0000', { pattern: 'blink', period: 300 }, 1500);
   }
   tiles();
@@ -524,14 +536,15 @@ function recent(text) {
 
 // --- every sample from the band -------------------------------------------------------------------
 function onSample(sample) {
+  rec.sample(sample);
   if (calib) calibSample(sample);
   const gesture = reader.feed(sample);
   if (reader.tap) onTap(reader.tap);
   if (reader.step && reader.step !== onSample.last) { onSample.last = reader.step; onStep(reader.step); }
-  if (gesture && inUse()) useGesture(toShape(gesture));
+  if (gesture && inUse()) { lastSpan = [gesture[0].t, gesture.at(-1).t]; useGesture(toShape(gesture)); }
   if (inUse() && !pending) {
     const done = sequence.tick(sample.t);
-    if (done) useTaps(done.count);
+    if (done) { lastSpan = [done.times[0], done.times.at(-1) + 300]; useTaps(done.count, done.times); }
   }
 }
 function onTap(tap) {
@@ -554,7 +567,7 @@ if (info) {
   new EventSource('/api/events').addEventListener('ack', (e) => {
     const a = JSON.parse(e.data);
     log(`guardian: ${a.text}`);
-    if (inUse()) card({ icon: '💬', title: a.text, hint: 'The guardian replied.', state: 'sent', back: 4000 });
+    if (inUse()) card({ icon: '', title: a.text, hint: 'Reply from the guardian', state: 'sent', back: 4000 });
     light('#00ff00', { pattern: 'breathe', period: 1000 }, 4000);
   });
 }
@@ -592,13 +605,16 @@ function drawWaves() {
   const state = $('#wave-state');
   const set = (text, kind = '') => { state.textContent = text; state.className = `soft small center ${kind}`; };
   if (calib) set('Calibrating');
-  else if (teaching) set(teaching.phase === 'go' ? 'Recording…' : 'Waiting');
-  else if (sequence.count) set(`${sequence.count} tap${sequence.count > 1 ? 's' : ''}…`, 'reading');
-  else if (reader.reading) set('Reading your gesture…', 'reading');
-  else if (reader.ready) set('● Ready', 'ready');
+  else if (teaching) set(teaching.phase === 'go' ? 'Recording' : 'Waiting');
+  else if (sequence.count) set(`${sequence.count} tap${sequence.count > 1 ? 's' : ''}`, 'reading');
+  else if (reader.reading) set('Reading', 'reading');
+  else if (reader.ready) set('Ready', 'ready');
   else set('Moving');
 }
 requestAnimationFrame(drawWaves);
+
+$('#full-log').checked = rec.fullLog;
+$('#full-log').onchange = () => { rec.fullLog = $('#full-log').checked; try { localStorage.setItem('epsilon-full-log', rec.fullLog ? 'on' : 'off'); } catch { /* private window */ } };
 
 $('#reset').onclick = () => {
   if (!confirm('Forget every recorded gesture?')) return;
@@ -611,7 +627,7 @@ $('#reset').onclick = () => {
 
 // --- connecting ------------------------------------------------------------------------------------------
 function bandState(text, on = false) {
-  $('#band-state').textContent = `Band ${BAND} · ${text}`;
+  $('#band-state').textContent = `Band ${BAND} ${text}`;
   $('#band-state').className = `pill${on ? ' on' : ''}`;
 }
 /** ±8 g instead of ±2 g: a firm tap reads more than 2 g, and at 2 g its peak is cut off. */
@@ -628,7 +644,7 @@ view('connect');
 onConnect(async (theBand, pretend) => {
   band = theBand;
   band.on('motion', onSample);
-  band.on('reconnecting', () => { reader.reset(); sequence.reset(); cancel(false); bandState('reconnecting…'); });
+  band.on('reconnecting', () => { reader.reset(); sequence.reset(); cancel(false); bandState('reconnecting'); });
   band.on('reconnected', () => { bandState('connected', true); widen(); if (teaching) beginWord(); else light(null); });
   band.on('disconnect', () => {
     band = null;
@@ -684,6 +700,7 @@ onConnect(async (theBand, pretend) => {
     throw new Error(`That is band ${band.number}, not ${BAND}. Disconnected.`);
   }
   say('');
+  rec.event({ kind: 'connected', name: band.name, info: band.info });
   bandState('connected', true);
   $('#waves').hidden = false;
   if (!tapSettings) startCalibration(afterSetup, REFERENCE_STEPS, 'reference');   // first time: the full reference recording

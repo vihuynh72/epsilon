@@ -18,6 +18,7 @@ Other computers on the Wi-Fi reach only those three, and only with the key. Ever
 (the kit, the band page) is served to this laptop only. `--local` keeps everything here.
 """
 import argparse
+import gzip
 import json
 import mimetypes
 import queue
@@ -271,7 +272,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- POST ------------------------------------------------------------------------
     def save_recording(self):
-        """POST /api/recording?name=calibration: raw band samples from the page, kept for tuning."""
+        """POST /api/recording?name=...: raw band samples or a gesture log from the page, kept in
+        data/recordings/ for tuning. JSON, or gzip-compressed JSON (Content-Type: application/gzip)."""
         if self.headers.get("X-Epsilon") != "1":
             return self.send_text(400, "Bad request")
         try:
@@ -281,13 +283,18 @@ class Handler(BaseHTTPRequestHandler):
         if not 0 < length <= MAX_RECORDING:
             return self.send_text(400, "Bad size")
         body = self.rfile.read(length)
+        packed = "gzip" in self.headers.get("Content-Type", "")
         try:
-            json.loads(body)
-        except ValueError:
+            text = gzip.decompress(body) if packed else body
+            if len(text) > 16 * MAX_RECORDING:
+                return self.send_text(400, "Bad size")
+            json.loads(text)
+        except (OSError, EOFError, ValueError):
             return self.send_text(400, "Not JSON")
-        name = "".join(c for c in parse_qs(urlsplit(self.path).query).get("name", ["recording"])[0] if c.isalnum() or c == "-")[:40] or "recording"
+        name = "".join(c for c in parse_qs(urlsplit(self.path).query).get("name", ["recording"])[0] if c.isalnum() or c == "-")[:60] or "recording"
         RECORDINGS.mkdir(parents=True, exist_ok=True)
-        path = RECORDINGS / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
+        path = RECORDINGS / f"{name}-{stamp}.json{'.gz' if packed else ''}"
         path.write_bytes(body)
         print(f"{time.strftime('%H:%M:%S')}  saved {path.relative_to(ROOT)} ({length // 1024} kB)", flush=True)
         return self.send_json(200, {"saved": str(path.relative_to(ROOT))})
