@@ -17,9 +17,28 @@ The wearer is an autistic person. Every choice is made for them first.
 
 Vi and Arun do not touch gesture code. Zach does not touch the hub.
 
+## Zach: how to join your band to the app
+
+Your band server (`hub/server.py`) already has what is needed: the `--forward` option. The app (`hub/app.py`) accepts exactly what it posts. Checked on 2026-11-14: words sent through your server reached the app and were texted to Vi's phone.
+
+1. Get the code: `git pull origin main` (it holds your branch and the app).
+2. Pick where the words go:
+
+| Where | Start your server like this | What happens |
+|---|---|---|
+| The app on Vi's laptop (same Wi-Fi) | `python3 hub/server.py --forward "http://<Vi's laptop address>:8787/gesture?k=KEY"` | Shown on the Messages page and texted to the parent's phone |
+| The app on Railway (anywhere) | `python3 hub/server.py --forward "https://epsilon-production-a4d0fa9e.up.railway.app/gesture?k=KEY"` | Shown on the Messages page. No text yet |
+| Everything on one laptop | `python3 -m hub.app` in one terminal, `python3 hub/server.py --forward http://127.0.0.1:8787/gesture` in another | Both |
+
+Ask Vi for `KEY`. It is not in this repo on purpose.
+
+- The word ids come from `hub/messages.json`. Both halves read that one file, so add or rename words there.
+- A word marked `"urgent": true` becomes a text plus a voice message.
+- Your server sends no confidence number, so the app's "hold back weak matches" rule never fires for band words. If your recogniser has a score, add `"confidence": 0.0 to 1.0` to what you forward and weak matches will be held.
+
 ## The one contract between the two halves
 
-Zach sends this to the hub each time a gesture is recognised:
+Anything else can also post to the hub directly:
 
 ```
 POST http://<hub address>:8787/gesture
@@ -28,7 +47,7 @@ Content-Type: application/json
 {"gesture": "water", "confidence": 0.93}
 ```
 
-- `gesture`: a name, 1 to 40 characters. It must match a name on the Settings page (water, milk, bathroom, break, hurt to start).
+- `gesture`: a name, 1 to 40 characters. It must match a word id in `hub/messages.json` (water, food, parents, sleep, help to start).
 - `confidence`: optional, a number from 0 to 1. Below 0.8 the hub holds the message back.
 - `time`: optional, seconds since 1970.
 
