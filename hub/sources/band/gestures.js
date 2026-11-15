@@ -6,11 +6,12 @@
 //                    accelerometer, giving the arm's pose and the movement without gravity
 //     -> Segmenter   start/stop with two thresholds, a short lead-in, and a pause required
 //                    before a gesture (continuous movement, such as stimming, never starts one)
-//     -> toShape     32 points x 9 numbers: movement, pose, turning
+//     -> toShape     32 points x 9 numbers, relative to the wearer at the start of the
+//                    movement: speed and direction, how far the wrist turned, the push
 //     -> classify    DTW distance to every example; each word has its own limit learned from
 //                    how alike its own examples are; "not sure" when far or when two words tie
-//   TapDetector   finds each tap in the raw signal (before smoothing): a sharp spike in
-//                 acceleration with little turning. TapSequencer groups taps until a real
+//   TapDetector   finds each tap in the raw signal (before smoothing): a narrow spike out of
+//                 calm, with its rebounds counted as one tap. TapSequencer groups taps until a real
 //                 gap, so 3 taps are 3 whether fast or slow. Both use the wearer's calibration.
 //   MotionReader wires it all together. A cut "gesture" that is only taps goes to the taps,
 //   not to the movement matcher, so taps and arm movements never get mixed up.
@@ -192,20 +193,46 @@ export class Segmenter {
 }
 
 // --- taps --------------------------------------------------------------------------------
+// Measured on band 44 (data/recordings/calibration-20261114-161551.json, band on a wrist/desk):
+// one tap is a cluster of spikes: the hit (2.2 to 2.7 g, cut off at the 2 g range), a rebound
+// about 120 ms later at 55 to 65 % of the hit, and a small third spike at about 190 ms. The
+// hit is 13 to 26 ms wide. Just before a tap the band is calm (turning 2 to 5 deg/s); during
+// it the wrist jolts (500 to 1200 deg/s). An arm movement is already turning beforehand.
+// So: a tap = a narrow spike out of calm; spikes in its ring count only if as strong as the hit.
+
 /** Tap settings. calibrate() replaces them with the wearer's own. */
 export const TAP_DEFAULTS = {
-  threshold: 0.35,      // g: a spike this sharp is a tap
-  refractoryMs: 80,     // after a tap, no new tap for this long (the band rings a little)
-  maxGapMs: 700,        // a longer gap ends the tap sequence
-  gyroMax: 90,          // deg/s: turning faster than this around the spike = an arm movement, not a tap
+  threshold: 0.6,       // g: the hit is at least this sharp
+  rebound: 0.8,         // inside the ring, a spike counts as a new tap only if this strong (x the hit)
+  ringMs: 260,          // how long one tap rings
+  maxGapMs: 1200,       // a longer gap ends the tap sequence (slow taps on band 44: about 850 ms apart)
+  calmGyro: 80,         // deg/s: the arm must turn slower than this just before a tap
 };
-const SPIKE_MS = 15;    // the smoothing the spike is measured against
-const SPIKE_MAX_MS = 50; // a tap's spike is over by then; one that lasts longer is a push or a swing
+const SPIKE_MS = 15;      // the smoothing the spike is measured against
+const SPIKE_MAX_MS = 90;  // a hit is narrower (13-26 ms, plus the hold); a longer spike is a push or a swing
+const SPIKE_HOLD_MS = 15; // a hit rings, so it is over only after staying low this long
+const LONG_MAX_MS = 250;  // after a long push, look for taps again after this at the latest
+const CALM_FROM = 150, CALM_TO = 25;   // ms before the hit that must be calm
 
-/** Finds taps in raw samples (any rate; 416/s is best). feed() returns a tap { t, peak } or null. */
+/** The spike signal of raw rows [t, ax, ay, az, ...] (or samples): how far each jumps from its recent average. */
+export function spikes(rows) {
+  const out = [];
+  let low = null, lastT = null;
+  for (const r of rows) {
+    const [t, ax, ay, az] = Array.isArray(r) ? r : [r.t, r.ax, r.ay, r.az];
+    if (low === null || t - lastT > 100 || t <= lastT) { low = [ax, ay, az]; lastT = t; out.push(0); continue; }
+    const k = 1 - Math.exp(-(t - lastT) / SPIKE_MS);
+    lastT = t;
+    low = [low[0] + (ax - low[0]) * k, low[1] + (ay - low[1]) * k, low[2] + (az - low[2]) * k];
+    out.push(Math.hypot(ax - low[0], ay - low[1], az - low[2]));
+  }
+  return out;
+}
+
+/** Finds taps in raw samples (416/s is best). feed() returns a tap { t, peak } or null. */
 export class TapDetector {
   constructor(settings = TAP_DEFAULTS) { this.settings = { ...TAP_DEFAULTS, ...settings }; this.reset(); }
-  reset() { this.low = null; this.lastT = null; this.lastTap = -Infinity; this.open = null; this.long = false; this.impulse = 0; this.turning = []; }
+  reset() { this.low = null; this.lastT = null; this.open = null; this.long = false; this.last = null; this.impulse = 0; this.history = []; }
   feed(s) {
     const a = [s.ax, s.ay, s.az];
     if (!a.every(Number.isFinite) || !Number.isFinite(s.t)) return null;
@@ -213,33 +240,46 @@ export class TapDetector {
     const k = 1 - Math.exp(-(s.t - this.lastT) / SPIKE_MS);
     this.lastT = s.t;
     this.low = this.low.map((x, i) => x + (a[i] - x) * k);
-    // the spike: how far the acceleration jumps away from its own recent average
     this.impulse = Math.hypot(a[0] - this.low[0], a[1] - this.low[1], a[2] - this.low[2]);
     const gyro = Number.isFinite(s.gx) ? Math.hypot(s.gx, s.gy, s.gz) : 0;
-    this.turning.push({ t: s.t, gyro });
-    while (this.turning.length && s.t - this.turning[0].t > 120) this.turning.shift();
+    this.history.push({ t: s.t, impulse: this.impulse, gyro });
+    while (this.history.length && s.t - this.history[0].t > CALM_FROM + 50) this.history.shift();
 
-    const { threshold, refractoryMs, gyroMax } = this.settings;
+    const { threshold } = this.settings;
     if (this.open) {                                   // inside a spike: follow it to its top
       this.open.peak = Math.max(this.open.peak, this.impulse);
-      if (this.impulse >= threshold * 0.5) {
-        if (s.t - this.open.t > SPIKE_MAX_MS) { this.open = null; this.long = true; }   // too long for a tap
-        return null;
-      }
-      const tap = this.open;
+      if (s.t - this.open.t > SPIKE_MAX_MS) { this.open = null; this.long = s.t; return null; }   // too wide for a hit
+      if (this.impulse >= threshold * 0.5) { this.open.low = null; return null; }
+      this.open.low ??= s.t;
+      if (s.t - this.open.low < SPIKE_HOLD_MS) return null;       // a dip inside the ringing, not the end
+      const spike = this.open;
       this.open = null;
-      const turning = Math.max(...this.turning.map((x) => x.gyro));
-      return turning <= gyroMax ? { ...tap, turning } : null;      // a jolt while the arm swings is no tap
+      return this.decide(spike);
     }
-    if (this.long) {                                   // wait until a long push or swing has calmed down
-      if (this.impulse < threshold * 0.5) this.long = false;
+    if (this.long) {
+      if (this.impulse < threshold * 0.5 || s.t - this.long > LONG_MAX_MS) this.long = false;
       return null;
     }
-    if (this.impulse > threshold && s.t - this.lastTap >= refractoryMs) {
-      this.open = { t: s.t, peak: this.impulse };
-      this.lastTap = s.t;
-    }
+    if (this.impulse > threshold) this.open = { t: s.t, peak: this.impulse, calm: this.calm(s.t) };
     return null;
+  }
+  /** Was the band calm just before time t? (no spikes, hardly turning) */
+  calm(t) {
+    const before = this.history.filter((h) => h.t >= t - CALM_FROM && h.t <= t - CALM_TO);
+    if (!before.length) return true;
+    const spike = Math.max(...before.map((h) => h.impulse));
+    const turning = before.reduce((sum, h) => sum + h.gyro, 0) / before.length;
+    return spike < this.settings.threshold * 0.6 && turning < this.settings.calmGyro;
+  }
+  decide(spike) {
+    const { rebound, ringMs } = this.settings;
+    // Right after a tap (its ring, and while its jolt fades) the band is never calm, so there a
+    // spike is a new tap only if about as strong as that tap; the rebounds are much weaker.
+    const near = this.last && spike.t - this.last.t < ringMs + CALM_FROM;
+    const isTap = near ? spike.peak >= this.last.peak * rebound : spike.calm;
+    if (!isTap) return null;
+    this.last = { t: spike.t, peak: spike.peak };
+    return { t: spike.t, peak: spike.peak };
   }
 }
 
@@ -258,44 +298,69 @@ export class TapSequencer {
   }
 }
 
-/** Is this cut gesture really just taps? (taps near it, and the arm hardly turned) */
-export function onlyTaps(gesture, tapTimes, gyroMax = TAP_DEFAULTS.gyroMax) {
-  const from = gesture[0].t - 80, to = gesture.at(-1).t + 80;
-  if (!tapTimes.some((t) => t >= from && t <= to)) return false;
-  return Math.max(...gesture.map((f) => Math.hypot(f.gx, f.gy, f.gz))) <= gyroMax * 1.3;
+/**
+ * Is this stretch of fused steps only taps? True when there were taps and every moment the
+ * band moved lies inside a tap's ring (so the "movement" is just the taps shaking the band).
+ */
+export function tapsOnly(steps, tapTimes, ringMs = TAP_DEFAULTS.ringMs, slackMs = 0) {
+  if (!steps.length) return false;
+  const inside = tapTimes.filter((t) => t >= steps[0].t - ringMs && t <= steps.at(-1).t + 80);
+  if (!inside.length) return false;
+  const outside = steps.filter((f) => isBusy(f, true) && !inside.some((t) => f.t >= t - 60 && f.t <= t + ringMs + 120));
+  return outside.length * STEP_MS <= slackMs;      // moving clearly outside the taps for longer = a movement
 }
 
 /**
- * Calibration from four recordings of raw samples (each a list of { impulse, gyro, tap? }):
- * still, slow taps, fast taps, normal arm movement. Returns { settings, warnings }.
+ * Calibration from four raw recordings, rows [t, ax, ay, az, gx, gy, gz]: still, slow taps,
+ * fast taps, normal arm movement. Measures the wearer's taps. Returns { settings, warnings, taps }.
  */
-export function calibrate({ still, slow, fast, move }) {
-  const pct = (list, q) => { const s = [...list].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : 0; };
-  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
-  const gaps = (taps) => taps.slice(1).map((t, i) => t - taps[i]);
+export function calibrate({ still = [], slow = [], fast = [], move = [], more = [] }) {
+  const pct = (list, q) => { const s = [...list].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : NaN; };
+  const clamp = (x, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : NaN);
+  const or = (x, fallback) => (Number.isFinite(x) ? x : fallback);
   const warnings = [];
-  const noise = pct(still.map((x) => x.impulse), 0.99);
-  const moving = pct(move.map((x) => x.impulse), 0.97);
-  const peaks = [...slow, ...fast].filter((x) => x.tap).map((x) => x.tap.peak);
-  const tapLow = pct(peaks, 0.2) || TAP_DEFAULTS.threshold * 2;
-  let threshold = Math.max(noise * 3, moving * 1.2, 0.08);
-  if (threshold > tapLow * 0.8) {
-    threshold = Math.max(noise * 3, tapLow * 0.6, 0.08);
-    warnings.push('Some arm movements are as sharp as your taps. Tap a little firmer.');
+  const noise = or(pct(spikes(still), 0.99), 0.05);
+
+  // Each tap: the first strong spike out of calm; then its ring (rebound ratio, how long it rings).
+  const clusters = [];
+  for (const rows of [slow, fast, ...more]) {
+    const imp = spikes(rows);
+    const gyro = rows.map((r) => Math.hypot(r[4], r[5], r[6]));
+    const found = [];
+    for (let i = 1; i < rows.length - 1; i++) {
+      if (!(imp[i] > Math.max(0.3, noise * 6) && imp[i] >= imp[i - 1] && imp[i] >= imp[i + 1])) continue;
+      const t = rows[i][0];
+      const last = found.at(-1);
+      if (last && t - last.t < 450) {                       // part of the ring of the tap before
+        if (t - last.t < 60) { last.peak = Math.max(last.peak, imp[i]); continue; }       // the same hit (a cut-off, flat top)
+        if (imp[i] > last.peak * 0.9 && t - last.t >= 80) { found.push({ t, peak: imp[i], ring: [], calmGyro: 0 }); continue; }   // a new hit
+        last.ring.push({ dt: t - last.t, ratio: imp[i] / last.peak });
+        continue;
+      }
+      const before = gyro.filter((_, j) => rows[j][0] >= t - CALM_FROM && rows[j][0] <= t - CALM_TO);
+      found.push({ t, peak: imp[i], ring: [], calmGyro: before.length ? before.reduce((p, q) => p + q, 0) / before.length : 0 });
+    }
+    clusters.push(found);
   }
-  const slowTaps = slow.filter((x) => x.tap).map((x) => x.tap.t);
-  const fastTaps = fast.filter((x) => x.tap).map((x) => x.tap.t);
-  const fastest = fastTaps.length > 1 ? Math.min(...gaps(fastTaps)) : 200;
-  const slowGap = slowTaps.length > 1 ? pct(gaps(slowTaps), 0.5) : 500;
-  const tapTurning = [...slow, ...fast].filter((x) => x.tap).map((x) => x.tap.turning);
+  const [slowTaps, fastTaps] = clusters;
+  const all = clusters.flat();
+  if (slowTaps.length + fastTaps.length < 6) warnings.push(`I felt ${slowTaps.length + fastTaps.length} of your 10 taps. Tap a little firmer and try again.`);
+
+  const hits = all.map((c) => c.peak);
+  const ring = all.flatMap((c) => c.ring);
+  const gaps = (list) => list.slice(1).map((c, i) => c.t - list[i].t);
+  const slowGap = pct(gaps(slowTaps), 0.5);
+  const fastGap = pct(gaps(fastTaps), 0.1);
+  const strongRing = ring.filter((r) => r.ratio > 0.1);
   const settings = {
-    threshold,
-    refractoryMs: clamp(fastest * 0.5, 40, 120),
-    maxGapMs: clamp(slowGap * 1.5, 450, 1500),
-    gyroMax: clamp(pct(tapTurning, 0.9) * 1.5, 40, 200),
+    threshold: clamp(Math.max(noise * 5, pct(hits, 0.1) * 0.4), 0.25, 3) || TAP_DEFAULTS.threshold,
+    rebound: clamp(Math.max(...ring.map((r) => r.ratio), 0) + 0.15, 0.6, 0.92) || TAP_DEFAULTS.rebound,
+    ringMs: clamp(Math.min(Math.max(...strongRing.map((r) => r.dt), 150) + 40, or(fastGap, Infinity) * 0.8), 150, 350) || TAP_DEFAULTS.ringMs,
+    maxGapMs: clamp(slowGap * 1.4, 450, 1500) || TAP_DEFAULTS.maxGapMs,
+    calmGyro: clamp(pct(all.map((c) => c.calmGyro), 0.9) * 5 + 30, 50, 200) || TAP_DEFAULTS.calmGyro,
   };
-  if (peaks.length < 6) warnings.push('I only felt a few of the taps. Try again and tap a little firmer.');
-  return { settings, warnings };
+  if (Number.isFinite(fastGap) && fastGap < settings.ringMs) warnings.push('Your fast taps are very fast: leave a little more room between them.');
+  return { settings, warnings, taps: { slow: slowTaps.length, fast: fastTaps.length } };
 }
 
 /**
@@ -326,23 +391,85 @@ export class MotionReader {
     if (!step) return null;
     this.step = this.fusion.feed(step);
     const gesture = this.segmenter.feed(this.step);
-    if (gesture && onlyTaps(gesture, this.tapTimes, this.tapSettings.gyroMax)) return null;   // the taps handle it
+    if (gesture && tapsOnly(gesture, this.tapTimes, this.tapSettings.ringMs)) return null;   // the taps handle it
     return gesture;
   }
 }
 
-/** A gesture as POINTS x FEATURES numbers, spread evenly over its time. */
+// --- the shape of a movement, relative to the wearer ----------------------------------------
+// Everything is measured from where the movement starts, in a frame tied to the wearer:
+//   up       = against gravity at the start
+//   forward  = the way the forearm points at the start (the band's x axis, made level)
+//   left     = up x forward
+// The band turns during a movement; the gyro tells how much, so every sample is turned back
+// into that start frame. Then only changes are compared, never positions:
+//   speed    how fast the hand moves, and which way (the push, added up; it starts and ends
+//            at rest, so whatever is left at the end is sensor drift and is taken out)
+//   turn     how far the wrist has turned since the start (the gyro, added up)
+//   push     the push itself (acceleration without gravity)
+// So "left" is left of the wearer however the wrist is turned or the arm is held.
+export const SPEED_SCALE = 0.08;      // g·s (about 0.8 m/s) counts as much as...
+export const TURN_SCALE = 1.2;        // ...this many radians of turning (about 70°), and as...
+export const PUSH_SCALE = 0.6;        // ...this many g of push
+
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+/** Rotation matrix for a small turn w (radians, the band's own axes), Rodrigues' formula. */
+function turnBy(w) {
+  const angle = Math.hypot(...w);
+  if (angle < 1e-9) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const [x, y, z] = w.map((v) => v / angle), c = Math.cos(angle), s = Math.sin(angle), C = 1 - c;
+  return [[c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+    [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+    [z * x * C - y * s, z * y * C + x * s, c + z * z * C]];
+}
+const times = (A, B) => A.map((row) => [0, 1, 2].map((j) => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+const apply = (A, v) => A.map((row) => dot(row, v));
+
+/** The wearer's frame at the start of a movement: [forward, left, up], in the band's axes then. */
+export function userFrame(first) {
+  const up = unit([first.ux, first.uy, first.uz]);
+  let forward = null;
+  for (const axis of [[1, 0, 0], [0, 0, 1], [0, 1, 0]]) {          // the forearm, or the next best level axis
+    const level = axis.map((v, i) => v - dot(axis, up) * up[i]);
+    if (Math.hypot(...level) > 0.4) { forward = unit(level); break; }
+  }
+  return [forward, cross(up, forward), up];
+}
+
+/** Each sample of a movement as [speed 3, turn 3, push 3] in the wearer's start frame. */
+export function relative(gesture) {
+  const frame = userFrame(gesture[0]);
+  let R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];                         // band now -> band at the start
+  let speed = [0, 0, 0], turn = [0, 0, 0];
+  const out = [];
+  for (let i = 0; i < gesture.length; i++) {
+    const f = gesture[i];
+    const dt = i ? (f.t - gesture[i - 1].t) / 1000 : 0;
+    const rate = [f.gx, f.gy, f.gz].map((v) => (v * Math.PI) / 180);
+    if (i) R = times(R, turnBy(rate.map((v) => v * dt)));
+    const push = apply(frame, apply(R, [f.lx, f.ly, f.lz]));
+    const spin = apply(frame, apply(R, rate));
+    speed = speed.map((v, k) => v + push[k] * dt);
+    turn = turn.map((v, k) => v + spin[k] * dt);
+    out.push({ t: f.t, speed: [...speed], turn: [...turn], push });
+  }
+  // The hand is at rest at both ends, so the speed must end at 0: what is left is drift.
+  const t0 = out[0].t, span = Math.max(1, out.at(-1).t - t0), drift = out.at(-1).speed;
+  for (const o of out) o.speed = o.speed.map((v, k) => v - drift[k] * ((o.t - t0) / span));
+  return out;
+}
+
+/** A movement as POINTS x FEATURES numbers (speed, turn, push), spread evenly over its time. */
 export function toShape(gesture) {
-  const vec = (f) => [f.lx / LIN_SCALE, f.ly / LIN_SCALE, f.lz / LIN_SCALE,
-    f.ux * POSE_WEIGHT, f.uy * POSE_WEIGHT, f.uz * POSE_WEIGHT,
-    f.gx / GYRO_SCALE, f.gy / GYRO_SCALE, f.gz / GYRO_SCALE];
-  const start = gesture[0].t, length = gesture.at(-1).t - start;
+  const rel = relative(gesture);
+  const vec = (o) => [...o.speed.map((v) => v / SPEED_SCALE), ...o.turn.map((v) => v / TURN_SCALE), ...o.push.map((v) => v / PUSH_SCALE)];
+  const start = rel[0].t, length = rel.at(-1).t - start;
   const shape = [];
   let i = 0;
   for (let p = 0; p < POINTS; p++) {
     const t = start + (length * p) / (POINTS - 1);
-    while (i < gesture.length - 2 && gesture[i + 1].t < t) i++;
-    const a = gesture[i], b = gesture[i + 1] ?? a;
+    while (i < rel.length - 2 && rel[i + 1].t < t) i++;
+    const a = rel[i], b = rel[i + 1] ?? a;
     const part = b.t > a.t ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 0;
     const va = vec(a), vb = vec(b);
     for (let k = 0; k < FEATURES; k++) shape.push(va[k] + (vb[k] - va[k]) * part);

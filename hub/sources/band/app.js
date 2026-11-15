@@ -11,7 +11,7 @@
 import { $, say, attempt, onConnect } from '../../../vexo-open-kit/projects/shared/page.js';
 import {
   MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes,
-  cutWindow, isBusy, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
+  cutWindow, isBusy, tapsOnly, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
 
@@ -23,7 +23,8 @@ const PAUSE_MS = 3000;            // teaching: the pause before each try
 const GO_MS = 3500;               // teaching: the longest a movement try may take
 const DONE_QUIET_MS = 400;        // teaching: still this long after moving = the try is over
 const WAVE_MS = 4000;             // the live picture shows the last 4 seconds
-const STORE = 'epsilon-examples-v2';
+const STORE = 'epsilon-examples-v3';      // v3: movements relative to the wearer (v2 movements are not comparable)
+const OLD_STORE = 'epsilon-examples-v2';  // its tap words carry over
 const TAP_STORE = 'epsilon-taps-v1';
 
 $('#number').value = String(BAND);
@@ -42,11 +43,12 @@ const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } ca
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private window */ } };
 function load() {
   const stored = read(STORE);
+  const old = stored ? null : read(OLD_STORE);
   taught = parseExamples(JSON.stringify(stored?.taught ?? null), IDS);
   learned = parseExamples(JSON.stringify(stored?.learned ?? null), IDS);
   tapWords = {};
   for (const id of IDS) {
-    const n = stored?.tapWords?.[id];
+    const n = (stored ?? old)?.tapWords?.[id];
     if (Number.isInteger(n) && n >= 1 && n <= 9) tapWords[id] = n;
   }
   const t = read(TAP_STORE);
@@ -88,7 +90,7 @@ function useTapSettings(settings) {
   reader.setTaps(settings);
   sequence = new TapSequencer(settings);
   const s = settings;
-  log(`taps: threshold ${s.threshold.toFixed(2)} g, fastest ${Math.round(s.refractoryMs * 2)} ms apart, gap ${Math.round(s.maxGapMs)} ms ends a sequence`);
+  log(`taps: threshold ${s.threshold.toFixed(2)} g, one tap rings ${Math.round(s.ringMs)} ms, a gap of ${Math.round(s.maxGapMs)} ms ends a sequence`);
 }
 if (tapSettings) useTapSettings(tapSettings);
 
@@ -106,77 +108,121 @@ function line(el, text, kind = '') {
   el.className = `${el.id.endsWith('phase') ? 'phase' : 'note'} ${kind}`;
 }
 
-// --- 1. calibrate: four short steps ------------------------------------------------------------
+// --- 1. calibrate: a short session, or the one-time reference recording -----------------------
+// Every step: an optional "Get ready" countdown (not recorded), then a recorded window. Tap
+// steps fill dots as taps are felt and end early once all were felt. Everything recorded is
+// saved to data/recordings/ on this laptop, so it can be studied and used as test data.
 const CALIB_STEPS = [
   { key: 'still', icon: '✋', title: 'Hold the band still', hint: 'Rest your arm. Don’t move.', ms: 3000 },
-  { key: 'slow', icon: '👆', title: 'Tap the band 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 15000 },
-  { key: 'fast', icon: '⚡', title: 'Now tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 10000 },
+  { key: 'slow', icon: '👆', title: 'Tap the band 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
+  { key: 'fast', icon: '⚡', title: 'Now tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
   { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like you normally would. No taps.', ms: 4000 },
 ];
-function startCalibration(then) {
+const MOVES = [
+  ['left', '⬅️', 'Move your hand to the left'], ['right', '➡️', 'Move your hand to the right'],
+  ['up', '⬆️', 'Move your hand up'], ['down', '⬇️', 'Move your hand down'],
+  ['forward', '⏫', 'Push your hand forward, away from you'], ['back', '⏬', 'Pull your hand back, toward you'],
+  ['twist', '🔄', 'Twist your wrist and back'], ['circle', '⭕', 'Draw a circle in the air'],
+];
+const REFERENCE_STEPS = [
+  { key: 'still', icon: '✋', title: 'Rest your arm', hint: 'Don’t move.', ms: 4000 },
+  { key: 'still-air', icon: '🖐️', title: 'Hold your arm up in front of you', hint: 'Keep it still.', ready: 2000, ms: 4000 },
+  { key: 'soft', icon: '🪶', title: 'Tap 5 times, softly', hint: 'The softest tap you would use.', taps: 5, ms: 9000 },
+  { key: 'hard', icon: '💥', title: 'Tap 5 times, hard', hint: 'A firm tap.', taps: 5, ms: 9000 },
+  { key: 'slow', icon: '👆', title: 'Tap 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
+  { key: 'fast', icon: '⚡', title: 'Tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
+  { key: 'pairs', icon: '✌️', title: 'Tap twice, pause. Three times.', hint: 'tap-tap … tap-tap … tap-tap', taps: 6, ms: 10000 },
+  { key: 'triples', icon: '🤟', title: 'Tap 3 times, pause. Three times.', hint: 'tap-tap-tap … tap-tap-tap …', taps: 9, ms: 12000 },
+  ...MOVES.flatMap(([key, icon, title]) => [1, 2, 3].map((n) => ({ key: `${key}-${n}`, icon, title, hint: `${n} of 3. Then hold still.`, ready: 2000, ms: 2500 }))),
+  { key: 'move', icon: '👋', title: 'Move around normally', hint: 'Like you usually would. No taps.', ready: 1500, ms: 8000 },
+];
+function startCalibration(then, steps = CALIB_STEPS, name = 'calibration') {
   cancel(false);
   stopTeaching();
-  calib = { i: -1, data: {}, then, timer: null, tick: null };
+  calib = { i: -1, raw: {}, steps, name, then, timer: null, tick: null, recording: false };
   view('calib');
   light(null);
   nextCalibStep();
 }
+function countdown(ms, text, kind, done) {
+  const until = Date.now() + ms;
+  const show = () => line($('#calib-phase'), text(Math.max(1, Math.ceil((until - Date.now()) / 1000))), kind);
+  show();
+  calib.tick = setInterval(show, 100);
+  calib.timer = setTimeout(() => { clearInterval(calib.tick); done(); }, ms);
+}
 function nextCalibStep() {
   clearTimeout(calib.timer);
   clearInterval(calib.tick);
+  calib.recording = false;
   calib.i++;
-  if (calib.i >= CALIB_STEPS.length) return finishCalibration();
-  const step = CALIB_STEPS[calib.i];
-  // A sensitive detector just for calibration: it should catch every tap, even soft ones.
-  calib.detector = new TapDetector({ ...TAP_DEFAULTS, threshold: 0.1, refractoryMs: 45, gyroMax: 400 });
-  calib.list = [];
+  if (calib.i >= calib.steps.length) return finishCalibration();
+  const step = calib.steps[calib.i];
+  // Only to fill the dots as you tap, a little more sensitive than normal. The settings come
+  // from calibrate(), which measures the raw recording afterwards.
+  calib.detector = new TapDetector({ ...TAP_DEFAULTS, threshold: 0.3, calmGyro: 200 });
   calib.taps = 0;
   calib.step = step;
-  $('#calib-step').textContent = `Step ${calib.i + 1} of ${CALIB_STEPS.length}`;
+  $('#calib-step').textContent = `Step ${calib.i + 1} of ${calib.steps.length}`;
   $('#calib-icon').textContent = step.icon;
   $('#calib-title').textContent = step.title;
   $('#calib-hint').textContent = step.hint;
   dots($('#calib-dots'), step.taps ?? 0, 0);
-  line($('#calib-phase'), '', 'wait');
-  const until = Date.now() + step.ms;
-  if (!step.taps) {
-    const show = () => line($('#calib-phase'), `${Math.max(1, Math.ceil((until - Date.now()) / 1000))}`, 'wait');
-    show();
-    calib.tick = setInterval(show, 100);
-  }
-  calib.timer = setTimeout(endCalibStep, step.ms);
+  const record = () => {
+    calib.raw[step.key] = [];
+    calib.recording = true;
+    light('#ffffff', { pattern: 'solid', brightness: 0.4 });
+    countdown(step.ms, (n) => (step.ready ? `Go! ${n}` : `${n}`), step.ready ? 'go' : 'wait', endCalibStep);
+  };
+  if (step.ready) { light(null); countdown(step.ready, (n) => `Get ready… ${n}`, 'wait', record); } else record();
 }
 function calibSample(sample) {
+  if (!calib.recording) return;
+  const r4 = (x) => Math.round(x * 1e4) / 1e4, r1 = (x) => Math.round(x * 10) / 10;
+  calib.raw[calib.step.key].push([Math.round(sample.t * 10) / 10, r4(sample.ax), r4(sample.ay), r4(sample.az), r1(sample.gx), r1(sample.gy), r1(sample.gz)]);
   const tap = calib.detector.feed(sample);
-  calib.list.push({ impulse: calib.detector.impulse, tap });
   if (tap && calib.step.taps) {
     calib.taps++;
     dots($('#calib-dots'), calib.step.taps, calib.taps);
-    light('#00ff00', { pattern: 'solid' }, 120);
-    if (calib.taps >= calib.step.taps) { clearTimeout(calib.timer); calib.timer = setTimeout(endCalibStep, 400); }
+    if (calib.taps >= calib.step.taps) { clearTimeout(calib.timer); clearInterval(calib.tick); calib.timer = setTimeout(endCalibStep, 600); }
   }
 }
 function endCalibStep() {
-  calib.data[calib.step.key] = calib.list;
+  calib.recording = false;
+  if (calib.step.taps) log(`${calib.name} ${calib.step.key}: felt ${calib.taps} of ${calib.step.taps} taps`);
   nextCalibStep();
 }
+/** Send the raw recording to the server (saved in data/recordings/, never leaves this laptop). */
+function saveRecording(name, raw, settings) {
+  fetch(`/api/recording?name=${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
+    body: JSON.stringify({ band: BAND, columns: ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'], accelRange: 8, steps: raw, settings, at: new Date().toISOString() }),
+  }).then((r) => r.json()).then((r) => log(`recording saved: ${r.saved}`), (e) => log(`recording not saved: ${e.message}`));
+}
 function finishCalibration() {
-  const { settings, warnings } = calibrate(calib.data);
-  const then = calib.then;
+  const raw = calib.raw;
+  const { settings, warnings, taps } = calibrate({ still: raw.still, slow: raw.slow, fast: raw.fast, move: raw.move, more: [raw.soft, raw.hard, raw.pairs, raw.triples].filter(Boolean) });
+  log(`${calib.name} measured ${taps.slow} slow and ${taps.fast} fast taps`);
+  const { then, name } = calib;
   calib = null;
   write(TAP_STORE, settings);
   useTapSettings(settings);
+  saveRecording(name, raw, settings);
   for (const w of warnings) log(`calibration: ${w}`);
+  $('#calib-step').textContent = '';
   $('#calib-icon').textContent = '✓';
-  $('#calib-title').textContent = 'Calibrated';
+  $('#calib-title').textContent = name === 'reference' ? 'Recorded, thank you' : 'Calibrated';
   $('#calib-hint').textContent = warnings[0] ?? 'The page knows your taps now.';
   dots($('#calib-dots'), 0, 0);
   line($('#calib-phase'), '');
   light('#00ff00', { pattern: 'flash', period: 250 }, 900);
-  setTimeout(then, warnings.length ? 3500 : 1200);
+  setTimeout(then, warnings.length ? 3500 : 1500);
 }
 $('#calib-skip').onclick = () => {
   if (!calib) return;
+  if (calib.recording || calib.step) calib.raw[calib.step.key] ??= [];
+  if (calib.name === 'reference') return endCalibStep();          // skip just this step
   const then = calib.then;
   clearTimeout(calib.timer);
   clearInterval(calib.tick);
@@ -184,6 +230,7 @@ $('#calib-skip').onclick = () => {
   then();
 };
 $('#calibrate').onclick = () => band && startCalibration(() => use());
+$('#reference').onclick = () => band && startCalibration(() => use(), REFERENCE_STEPS, 'reference');
 
 // --- 2. teach: one word at a time, on a timer --------------------------------------------------
 function teach(queue) {
@@ -257,9 +304,8 @@ function finishTry() {
   if (!teaching || teaching.phase !== 'go') return;
   clearTimeout(teaching.timer);
   teaching.phase = 'pause';
-  const turning = Math.max(0, ...teaching.capture.map((f) => Math.hypot(f.gx, f.gy, f.gz)));
   let tryOut = null;
-  if (teaching.taps.length && turning <= sequence.settings.gyroMax * 1.3) {
+  if (teaching.taps.length && tapsOnly(teaching.capture, teaching.taps, sequence.settings.ringMs, 300)) {
     tryOut = { taps: teaching.taps.length };
   } else {
     const cut = cutWindow(teaching.capture);
@@ -383,7 +429,8 @@ function useGesture(shape) {
   const got = classify(shape, movements(), { tolerance: tolerance() });
   const near = got.ranked.slice(0, 3).map((r) => `${r.id} ${r.score.toFixed(2)}`).join(', ');
   log(`movement -> ${got.id ?? `not sure (${got.reason})`}   [${near}]`);
-  if (got.id) return propose(got.id, shape, 'gesture');
+  // confidence for the guardian's app: 1 = right on an example, 0 = at the edge of "not sure"
+  if (got.id) return propose(got.id, shape, 'gesture', Math.max(0, Math.min(1, 1 - got.best.score)));
   if (got.reason === 'none') return;
   card({ icon: '🤔', title: 'Didn’t catch that', hint: 'Try again: pause, gesture, pause.', state: 'unsure', back: 2500 });
   light(null);
@@ -392,13 +439,13 @@ function useTaps(n) {
   if (pending) return;
   const id = wordForTaps(n);
   log(`${n} tap${n > 1 ? 's' : ''} -> ${id ?? (n === 3 && $('#tap-help').checked ? 'help (built in)' : 'no word')}`);
-  if (id) return propose(id, null, 'taps');
-  if (n === 3 && $('#tap-help').checked) return send('help', 'taps');
+  if (id) return propose(id, null, 'taps', 1);            // a tap count is exact
+  if (n === 3 && $('#tap-help').checked) return send('help', 'taps', null, 1);
   card({ icon: '🤔', title: `${n} tap${n > 1 ? 's' : ''}`, hint: 'No word uses that many taps.', state: 'unsure', back: 2500 });
 }
-function propose(id, shape, via) {
+function propose(id, shape, via, confidence) {
   const w = word(id);
-  pending = { id, shape, via, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape); }, CONFIRM_MS) };
+  pending = { id, shape, via, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape, confidence); }, CONFIRM_MS) };
   sequence.reset();
   card({ icon: w.icon, title: w.label, hint: 'Sending… tap twice to cancel.', colour: w.colour, bar: true });
   tiles(id);
@@ -415,16 +462,16 @@ function cancel(tell = true) {
 }
 $('#cancel').onclick = () => cancel();
 
-async function send(id, via, shape = null) {
+async function send(id, via, shape = null, confidence = null) {
   const w = word(id);
   try {
     const r = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
-      body: JSON.stringify({ id, via }),
+      body: JSON.stringify({ id, via, confidence }),
     });
     if (!r.ok) throw new Error(`server said ${r.status}`);
-    log(`SENT ${id} (${via})`);
+    log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})`);
     card({ icon: w.icon, title: `${w.label}: sent ✓`, hint: `“${w.phrase}”`, colour: w.colour, state: 'sent', back: 3000 });
     light('#00ff00', { pattern: 'flash', period: 300 }, 1500);
     recent(`${w.icon} ${w.label}`);
@@ -545,6 +592,10 @@ function bandState(text, on = false) {
   $('#band-state').textContent = `Band ${BAND} · ${text}`;
   $('#band-state').className = `pill${on ? ' on' : ''}`;
 }
+/** ±8 g instead of ±2 g: a firm tap reads more than 2 g, and at 2 g its peak is cut off. */
+async function widen() {
+  try { await band.setMotion({ accelRange: 8 }); log('accelerometer: ±8 g'); } catch (e) { log(`accelerometer range not set: ${e.message}`); }
+}
 function afterSetup() {
   const missing = IDS.filter((id) => !isTaught(id));
   if (missing.length) teach(missing);
@@ -556,7 +607,7 @@ onConnect(async (theBand, pretend) => {
   band = theBand;
   band.on('motion', onSample);
   band.on('reconnecting', () => { reader.reset(); sequence.reset(); cancel(false); bandState('reconnecting…'); });
-  band.on('reconnected', () => { bandState('connected', true); if (teaching) beginWord(); else light(null); });
+  band.on('reconnected', () => { bandState('connected', true); widen(); if (teaching) beginWord(); else light(null); });
   band.on('disconnect', () => {
     band = null;
     reader.reset();
@@ -587,6 +638,7 @@ onConnect(async (theBand, pretend) => {
     const tapRun = (n, gap) => () => {
       for (let k = 0; k < n; k++) { pretend.playMotion(...PRETEND_TAP); pretend.playMotion({}, { seconds: gap }); }
     };
+    button('pretend-taps1', '1 tap', tapRun(1, 0.1));
     button('pretend-taps2', '2 taps', tapRun(2, 0.15));
     button('pretend-taps3', '3 fast taps', tapRun(3, 0.12));
     button('pretend-taps3slow', '3 slow taps', tapRun(3, 0.6));
@@ -604,6 +656,7 @@ onConnect(async (theBand, pretend) => {
       log(`motion ${rate}/s not possible: ${e.message}`);
     }
   }
+  await widen();
   if (band.number !== BAND) {                        // Band.connect(44) already checks; belt and braces
     await band.disconnect();
     throw new Error(`That is band ${band.number}, not ${BAND}. Disconnected.`);
@@ -611,6 +664,6 @@ onConnect(async (theBand, pretend) => {
   say('');
   bandState('connected', true);
   $('#waves').hidden = false;
-  if (!tapSettings) startCalibration(afterSetup);
+  if (!tapSettings) startCalibration(afterSetup, REFERENCE_STEPS, 'reference');   // first time: the full reference recording
   else afterSetup();
 });
