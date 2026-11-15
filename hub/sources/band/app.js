@@ -23,7 +23,8 @@ const PAUSE_MS = 3000;            // teaching: the pause before each try
 const GO_MS = 3500;               // teaching: the longest a movement try may take
 const DONE_QUIET_MS = 400;        // teaching: still this long after moving = the try is over
 const WAVE_MS = 4000;             // the live picture shows the last 4 seconds
-const STORE = 'epsilon-examples-v2';
+const STORE = 'epsilon-examples-v3';      // v3: movements relative to the wearer (v2 movements are not comparable)
+const OLD_STORE = 'epsilon-examples-v2';  // its tap words carry over
 const TAP_STORE = 'epsilon-taps-v1';
 
 $('#number').value = String(BAND);
@@ -42,11 +43,12 @@ const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } ca
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private window */ } };
 function load() {
   const stored = read(STORE);
+  const old = stored ? null : read(OLD_STORE);
   taught = parseExamples(JSON.stringify(stored?.taught ?? null), IDS);
   learned = parseExamples(JSON.stringify(stored?.learned ?? null), IDS);
   tapWords = {};
   for (const id of IDS) {
-    const n = stored?.tapWords?.[id];
+    const n = (stored ?? old)?.tapWords?.[id];
     if (Number.isInteger(n) && n >= 1 && n <= 9) tapWords[id] = n;
   }
   const t = read(TAP_STORE);

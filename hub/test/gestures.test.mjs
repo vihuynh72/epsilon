@@ -253,3 +253,63 @@ test('teaching: a window of taps counts as taps, a window with a movement does n
   const circle = windowOf(samples(...PRETEND.circle));
   assert.ok(!tapsOnly(circle.steps, [circle.steps[60].t], TAP_DEFAULTS.ringMs, 300), 'a circle with a tap in it is a movement');
 });
+
+// --- movements relative to the wearer ---------------------------------------------------------
+// Physically correct samples: the hand moves in the world (x forward, y left, z up) while the
+// band is worn at some orientation. The sensor reads the push plus 1 g against gravity, in its
+// own axes. The forearm is the band's x axis.
+const rotX = (a) => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]];
+const rotY = (a) => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]];
+const mul = (A, B) => A.map((r) => [0, 1, 2].map((j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+const tr = (A) => [0, 1, 2].map((i) => [0, 1, 2].map((j) => A[j][i]));
+const app = (A, v) => A.map((r) => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]);
+const DIRS = { forward: [1, 0, 0], back: [-1, 0, 0], left: [0, 1, 0], right: [0, -1, 0], up: [0, 0, 1], down: [0, 0, -1] };
+/** `dir` moved 0.6 s (speed up, slow down), band turned `roll` about the forearm, forearm tilted `tilt`. */
+function worldMove(dir, { roll = 0, tilt = 0, slow = 1, noise = 0.01 } = {}) {
+  const R = mul(rotY(-tilt), rotX(roll));               // band -> world
+  const toBand = tr(R);
+  const out = [], T = 0.6 * slow;
+  for (let i = 0; i < (T + 2) * 208; i++) {
+    const s = i / 208 - 1;
+    const push = s >= 0 && s < T ? 1.0 * Math.sin((2 * Math.PI * s) / T) / (slow * slow) : 0;
+    const a = app(toBand, [DIRS[dir][0] * push, DIRS[dir][1] * push, DIRS[dir][2] * push + 1]);
+    const j = () => (Math.random() - 0.5) * noise;
+    out.push({ t: 5000 + (i * 1000) / 208, ax: a[0] + j(), ay: a[1] + j(), az: a[2] + j(), gx: j() * 100, gy: j() * 100, gz: j() * 100 });
+  }
+  return out;
+}
+const moveShape = (dir, o) => { const g = read(worldMove(dir, o)); assert.equal(g.length, 1, `${dir} ${JSON.stringify(o ?? {})}: ${g.length} cut`); return toShape(g[0]); };
+
+test('relative: a direction looks the same however the wrist is turned or the forearm tilted', () => {
+  const { distance } = imports;
+  for (const dir of Object.keys(DIRS)) {
+    const base = moveShape(dir);
+    for (const o of [{ roll: Math.PI / 2 }, { roll: Math.PI }, { roll: -Math.PI / 3, tilt: 0.5 }]) {
+      const d = distance(base, moveShape(dir, o));
+      assert.ok(d < 0.3, `${dir} at ${JSON.stringify(o)}: ${d.toFixed(2)} from the same move unturned`);
+    }
+  }
+});
+
+test('relative: the six directions are far apart from each other', () => {
+  const { distance } = imports;
+  const shapes = Object.fromEntries(Object.keys(DIRS).map((d) => [d, moveShape(d)]));
+  // the same move with the wrist turned stays under 0.3 (test above); different directions are
+  // at least 5 times further apart than that
+  const rows = [];
+  for (const a of Object.keys(DIRS)) {
+    rows.push(`${a.padEnd(8)}${Object.keys(DIRS).map((b) => distance(shapes[a], shapes[b]).toFixed(2).padStart(6)).join('')}`);
+    for (const b of Object.keys(DIRS)) if (a !== b) assert.ok(distance(shapes[a], shapes[b]) > 1.5, `${a} vs ${b}: ${distance(shapes[a], shapes[b]).toFixed(2)}`);
+  }
+  if (process.env.SHOW) console.log(`        ${Object.keys(DIRS).map((d) => d.padStart(6)).join('')}\n${rows.join('\n')}`);
+});
+
+test('relative: taught with the wrist one way, recognised with it turned another way', () => {
+  const words = Object.keys(DIRS);
+  const examples = Object.fromEntries(words.map((d) => [d, [moveShape(d), moveShape(d, { slow: 1.2 }), moveShape(d, { slow: 0.85 })]]));
+  assert.deepEqual(Object.values(check(examples)).flatMap((r) => r.wrong), []);
+  for (const d of words) {
+    const got = classify(moveShape(d, { roll: Math.PI / 2, tilt: 0.3, slow: 1.1 }), examples);
+    assert.equal(got.id, d, `${d} with the wrist turned -> ${got.id ?? got.reason}`);
+  }
+});

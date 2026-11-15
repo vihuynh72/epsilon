@@ -6,7 +6,8 @@
 //                    accelerometer, giving the arm's pose and the movement without gravity
 //     -> Segmenter   start/stop with two thresholds, a short lead-in, and a pause required
 //                    before a gesture (continuous movement, such as stimming, never starts one)
-//     -> toShape     32 points x 9 numbers: movement, pose, turning
+//     -> toShape     32 points x 9 numbers, relative to the wearer at the start of the
+//                    movement: speed and direction, how far the wrist turned, the push
 //     -> classify    DTW distance to every example; each word has its own limit learned from
 //                    how alike its own examples are; "not sure" when far or when two words tie
 //   TapDetector   finds each tap in the raw signal (before smoothing): a narrow spike out of
@@ -395,18 +396,80 @@ export class MotionReader {
   }
 }
 
-/** A gesture as POINTS x FEATURES numbers, spread evenly over its time. */
+// --- the shape of a movement, relative to the wearer ----------------------------------------
+// Everything is measured from where the movement starts, in a frame tied to the wearer:
+//   up       = against gravity at the start
+//   forward  = the way the forearm points at the start (the band's x axis, made level)
+//   left     = up x forward
+// The band turns during a movement; the gyro tells how much, so every sample is turned back
+// into that start frame. Then only changes are compared, never positions:
+//   speed    how fast the hand moves, and which way (the push, added up; it starts and ends
+//            at rest, so whatever is left at the end is sensor drift and is taken out)
+//   turn     how far the wrist has turned since the start (the gyro, added up)
+//   push     the push itself (acceleration without gravity)
+// So "left" is left of the wearer however the wrist is turned or the arm is held.
+export const SPEED_SCALE = 0.08;      // g·s (about 0.8 m/s) counts as much as...
+export const TURN_SCALE = 1.2;        // ...this many radians of turning (about 70°), and as...
+export const PUSH_SCALE = 0.6;        // ...this many g of push
+
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+/** Rotation matrix for a small turn w (radians, the band's own axes), Rodrigues' formula. */
+function turnBy(w) {
+  const angle = Math.hypot(...w);
+  if (angle < 1e-9) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const [x, y, z] = w.map((v) => v / angle), c = Math.cos(angle), s = Math.sin(angle), C = 1 - c;
+  return [[c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+    [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+    [z * x * C - y * s, z * y * C + x * s, c + z * z * C]];
+}
+const times = (A, B) => A.map((row) => [0, 1, 2].map((j) => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+const apply = (A, v) => A.map((row) => dot(row, v));
+
+/** The wearer's frame at the start of a movement: [forward, left, up], in the band's axes then. */
+export function userFrame(first) {
+  const up = unit([first.ux, first.uy, first.uz]);
+  let forward = null;
+  for (const axis of [[1, 0, 0], [0, 0, 1], [0, 1, 0]]) {          // the forearm, or the next best level axis
+    const level = axis.map((v, i) => v - dot(axis, up) * up[i]);
+    if (Math.hypot(...level) > 0.4) { forward = unit(level); break; }
+  }
+  return [forward, cross(up, forward), up];
+}
+
+/** Each sample of a movement as [speed 3, turn 3, push 3] in the wearer's start frame. */
+export function relative(gesture) {
+  const frame = userFrame(gesture[0]);
+  let R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];                         // band now -> band at the start
+  let speed = [0, 0, 0], turn = [0, 0, 0];
+  const out = [];
+  for (let i = 0; i < gesture.length; i++) {
+    const f = gesture[i];
+    const dt = i ? (f.t - gesture[i - 1].t) / 1000 : 0;
+    const rate = [f.gx, f.gy, f.gz].map((v) => (v * Math.PI) / 180);
+    if (i) R = times(R, turnBy(rate.map((v) => v * dt)));
+    const push = apply(frame, apply(R, [f.lx, f.ly, f.lz]));
+    const spin = apply(frame, apply(R, rate));
+    speed = speed.map((v, k) => v + push[k] * dt);
+    turn = turn.map((v, k) => v + spin[k] * dt);
+    out.push({ t: f.t, speed: [...speed], turn: [...turn], push });
+  }
+  // The hand is at rest at both ends, so the speed must end at 0: what is left is drift.
+  const t0 = out[0].t, span = Math.max(1, out.at(-1).t - t0), drift = out.at(-1).speed;
+  for (const o of out) o.speed = o.speed.map((v, k) => v - drift[k] * ((o.t - t0) / span));
+  return out;
+}
+
+/** A movement as POINTS x FEATURES numbers (speed, turn, push), spread evenly over its time. */
 export function toShape(gesture) {
-  const vec = (f) => [f.lx / LIN_SCALE, f.ly / LIN_SCALE, f.lz / LIN_SCALE,
-    f.ux * POSE_WEIGHT, f.uy * POSE_WEIGHT, f.uz * POSE_WEIGHT,
-    f.gx / GYRO_SCALE, f.gy / GYRO_SCALE, f.gz / GYRO_SCALE];
-  const start = gesture[0].t, length = gesture.at(-1).t - start;
+  const rel = relative(gesture);
+  const vec = (o) => [...o.speed.map((v) => v / SPEED_SCALE), ...o.turn.map((v) => v / TURN_SCALE), ...o.push.map((v) => v / PUSH_SCALE)];
+  const start = rel[0].t, length = rel.at(-1).t - start;
   const shape = [];
   let i = 0;
   for (let p = 0; p < POINTS; p++) {
     const t = start + (length * p) / (POINTS - 1);
-    while (i < gesture.length - 2 && gesture[i + 1].t < t) i++;
-    const a = gesture[i], b = gesture[i + 1] ?? a;
+    while (i < rel.length - 2 && rel[i + 1].t < t) i++;
+    const a = rel[i], b = rel[i + 1] ?? a;
     const part = b.t > a.t ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 0;
     const va = vec(a), vb = vec(b);
     for (let k = 0; k < FEATURES; k++) shape.push(va[k] + (vb[k] - va[k]) * part);
