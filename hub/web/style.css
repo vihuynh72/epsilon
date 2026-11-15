@@ -331,3 +331,4 @@ a { color: inherit; }
 .story.is-playing .s7 { animation-delay: 5.7s; } .story.is-playing .s8 { animation-delay: 6.9s; }
 @keyframes story-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .story.is-playing > * { opacity: 1; animation: none; } }
+.story.is-playing .s9 { animation-delay: 8.1s; } .story.is-playing .s10 { animation-delay: 9.3s; }
