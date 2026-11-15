@@ -9,7 +9,11 @@
 //     -> toShape     32 points x 9 numbers: movement, pose, turning
 //     -> classify    DTW distance to every example; each word has its own limit learned from
 //                    how alike its own examples are; "not sure" when far or when two words tie
-//   MotionReader wires the first four together. TapCounter: 3 taps = Help.
+//   TapDetector   finds each tap in the raw signal (before smoothing): a sharp spike in
+//                 acceleration with little turning. TapSequencer groups taps until a real
+//                 gap, so 3 taps are 3 whether fast or slow. Both use the wearer's calibration.
+//   MotionReader wires it all together. A cut "gesture" that is only taps goes to the taps,
+//   not to the movement matcher, so taps and arm movements never get mixed up.
 
 const AXES = ['ax', 'ay', 'az', 'gx', 'gy', 'gz'];
 
@@ -22,10 +26,10 @@ export const START_GYRO = 40;         // deg/s: a gesture starts above this...
 export const START_LIN = 0.12;        // ...or above this much movement (g)
 export const KEEP_GYRO = 15;          // deg/s: still moving above this...
 export const KEEP_LIN = 0.05;         // ...or this (g). Below both = still
-export const STILL_BEFORE_MS = 400;   // the arm must be still this long before a gesture
+export const STILL_BEFORE_MS = 300;   // the arm must be still this long before a gesture
 export const LEAD_IN_MS = 120;        // kept from before the start, so the start is not cut off
-export const QUIET_MS = 300;          // still this long = the gesture is over
-export const MIN_MS = 250;            // shorter is a bump
+export const QUIET_MS = 250;          // still this long = the gesture is over
+export const MIN_MS = 120;            // shorter is a bump (a firm tap is about 150 ms)
 export const MAX_MS = 3000;           // longer is just moving around
 export const POINTS = 32;
 export const FEATURES = 9;
@@ -72,6 +76,7 @@ export class Smoother {
  */
 export class Fusion {
   static ALPHA = 0.04;                 // how hard gravity is pulled toward the accelerometer each step
+  static ALPHA_STILL = 0.3;            // ...and when the band is hardly turning: then the accelerometer IS gravity
   static WINDOW = 25;                  // 0.5 s of steps to decide "still"
   constructor() { this.reset(); }
   reset() { this.g = null; this.bias = [0, 0, 0]; this.rest = 1; this.window = []; this.lastT = null; }
@@ -91,9 +96,13 @@ export class Fusion {
       const dt = (s.t - this.lastT) / 1000;
       const turn = cross(w.map((x) => (x * Math.PI / 180) * dt), this.g);
       let g = this.g.map((x, i) => x - turn[i]);
-      if (Math.abs(mag - this.rest) < 0.15) {          // the accelerometer is mostly gravity right now
+      const off = Math.abs(mag - this.rest);
+      if (off < 0.15) {                                 // the accelerometer is mostly gravity right now
+        // Hardly turning and no push: trust the accelerometer a lot, so gravity catches up
+        // within about 0.1 s after a gesture and the gesture can end.
+        const alpha = Math.hypot(...w) < KEEP_GYRO && off < 0.05 ? Fusion.ALPHA_STILL : Fusion.ALPHA;
         const u = unit(a);
-        g = g.map((x, i) => x * (1 - Fusion.ALPHA) + u[i] * Fusion.ALPHA);
+        g = g.map((x, i) => x * (1 - alpha) + u[i] * alpha);
       }
       this.g = unit(g);
     }
@@ -110,6 +119,27 @@ export class Fusion {
     this.bias = this.bias.map((b, i) => b * 0.9 + mean[i] * 0.1);
     this.rest = this.rest * 0.9 + (mags.reduce((p, q) => p + q, 0) / mags.length) * 0.1;
   }
+}
+
+/** Is the band moving at this fused sample? `start` = clearly, otherwise a little. */
+export function isBusy(f, start = false) {
+  const turning = Math.hypot(f.gx, f.gy, f.gz), moving = Math.hypot(f.lx, f.ly, f.lz);
+  return start ? turning > START_GYRO || moving > START_LIN : turning > KEEP_GYRO || moving > KEEP_LIN;
+}
+
+/**
+ * While teaching: the part of a recording window where the band moved, cut the same way
+ * the Segmenter cuts (a short lead-in, up to the last moving sample). null = no movement.
+ */
+export function cutWindow(steps) {
+  let first = steps.findIndex((f) => isBusy(f, true));
+  if (first < 0) first = steps.findIndex((f) => isBusy(f));       // a gentle movement still counts
+  if (first < 0) return null;
+  let last = first;
+  for (let i = first; i < steps.length; i++) if (isBusy(steps[i])) last = i;
+  const from = steps[first].t - LEAD_IN_MS;
+  const cut = steps.filter((f, i) => f.t >= from && i <= last + 1);
+  return cut.length >= 2 ? cut : null;
 }
 
 /** Cuts gestures out of fused samples. feed() returns the samples of a finished gesture, or null. */
@@ -161,13 +191,143 @@ export class Segmenter {
   }
 }
 
-/** Raw band samples in, finished gestures out. */
+// --- taps --------------------------------------------------------------------------------
+/** Tap settings. calibrate() replaces them with the wearer's own. */
+export const TAP_DEFAULTS = {
+  threshold: 0.35,      // g: a spike this sharp is a tap
+  refractoryMs: 80,     // after a tap, no new tap for this long (the band rings a little)
+  maxGapMs: 700,        // a longer gap ends the tap sequence
+  gyroMax: 90,          // deg/s: turning faster than this around the spike = an arm movement, not a tap
+};
+const SPIKE_MS = 15;    // the smoothing the spike is measured against
+const SPIKE_MAX_MS = 50; // a tap's spike is over by then; one that lasts longer is a push or a swing
+
+/** Finds taps in raw samples (any rate; 416/s is best). feed() returns a tap { t, peak } or null. */
+export class TapDetector {
+  constructor(settings = TAP_DEFAULTS) { this.settings = { ...TAP_DEFAULTS, ...settings }; this.reset(); }
+  reset() { this.low = null; this.lastT = null; this.lastTap = -Infinity; this.open = null; this.long = false; this.impulse = 0; this.turning = []; }
+  feed(s) {
+    const a = [s.ax, s.ay, s.az];
+    if (!a.every(Number.isFinite) || !Number.isFinite(s.t)) return null;
+    if (this.low === null || s.t <= this.lastT || s.t - this.lastT > 100) { this.reset(); this.low = a; this.lastT = s.t; return null; }
+    const k = 1 - Math.exp(-(s.t - this.lastT) / SPIKE_MS);
+    this.lastT = s.t;
+    this.low = this.low.map((x, i) => x + (a[i] - x) * k);
+    // the spike: how far the acceleration jumps away from its own recent average
+    this.impulse = Math.hypot(a[0] - this.low[0], a[1] - this.low[1], a[2] - this.low[2]);
+    const gyro = Number.isFinite(s.gx) ? Math.hypot(s.gx, s.gy, s.gz) : 0;
+    this.turning.push({ t: s.t, gyro });
+    while (this.turning.length && s.t - this.turning[0].t > 120) this.turning.shift();
+
+    const { threshold, refractoryMs, gyroMax } = this.settings;
+    if (this.open) {                                   // inside a spike: follow it to its top
+      this.open.peak = Math.max(this.open.peak, this.impulse);
+      if (this.impulse >= threshold * 0.5) {
+        if (s.t - this.open.t > SPIKE_MAX_MS) { this.open = null; this.long = true; }   // too long for a tap
+        return null;
+      }
+      const tap = this.open;
+      this.open = null;
+      const turning = Math.max(...this.turning.map((x) => x.gyro));
+      return turning <= gyroMax ? { ...tap, turning } : null;      // a jolt while the arm swings is no tap
+    }
+    if (this.long) {                                   // wait until a long push or swing has calmed down
+      if (this.impulse < threshold * 0.5) this.long = false;
+      return null;
+    }
+    if (this.impulse > threshold && s.t - this.lastTap >= refractoryMs) {
+      this.open = { t: s.t, peak: this.impulse };
+      this.lastTap = s.t;
+    }
+    return null;
+  }
+}
+
+/** Groups taps into sequences. tick() returns { count, times } once a sequence is over. */
+export class TapSequencer {
+  constructor(settings = TAP_DEFAULTS) { this.settings = { ...TAP_DEFAULTS, ...settings }; this.times = []; }
+  reset() { this.times = []; }
+  add(tap) { this.times.push(tap.t); }
+  get count() { return this.times.length; }
+  get last() { return this.times.at(-1) ?? -Infinity; }
+  tick(t) {
+    if (!this.times.length || t - this.last <= this.settings.maxGapMs) return null;
+    const done = { count: this.times.length, times: this.times };
+    this.times = [];
+    return done;
+  }
+}
+
+/** Is this cut gesture really just taps? (taps near it, and the arm hardly turned) */
+export function onlyTaps(gesture, tapTimes, gyroMax = TAP_DEFAULTS.gyroMax) {
+  const from = gesture[0].t - 80, to = gesture.at(-1).t + 80;
+  if (!tapTimes.some((t) => t >= from && t <= to)) return false;
+  return Math.max(...gesture.map((f) => Math.hypot(f.gx, f.gy, f.gz))) <= gyroMax * 1.3;
+}
+
+/**
+ * Calibration from four recordings of raw samples (each a list of { impulse, gyro, tap? }):
+ * still, slow taps, fast taps, normal arm movement. Returns { settings, warnings }.
+ */
+export function calibrate({ still, slow, fast, move }) {
+  const pct = (list, q) => { const s = [...list].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : 0; };
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  const gaps = (taps) => taps.slice(1).map((t, i) => t - taps[i]);
+  const warnings = [];
+  const noise = pct(still.map((x) => x.impulse), 0.99);
+  const moving = pct(move.map((x) => x.impulse), 0.97);
+  const peaks = [...slow, ...fast].filter((x) => x.tap).map((x) => x.tap.peak);
+  const tapLow = pct(peaks, 0.2) || TAP_DEFAULTS.threshold * 2;
+  let threshold = Math.max(noise * 3, moving * 1.2, 0.08);
+  if (threshold > tapLow * 0.8) {
+    threshold = Math.max(noise * 3, tapLow * 0.6, 0.08);
+    warnings.push('Some arm movements are as sharp as your taps. Tap a little firmer.');
+  }
+  const slowTaps = slow.filter((x) => x.tap).map((x) => x.tap.t);
+  const fastTaps = fast.filter((x) => x.tap).map((x) => x.tap.t);
+  const fastest = fastTaps.length > 1 ? Math.min(...gaps(fastTaps)) : 200;
+  const slowGap = slowTaps.length > 1 ? pct(gaps(slowTaps), 0.5) : 500;
+  const tapTurning = [...slow, ...fast].filter((x) => x.tap).map((x) => x.tap.turning);
+  const settings = {
+    threshold,
+    refractoryMs: clamp(fastest * 0.5, 40, 120),
+    maxGapMs: clamp(slowGap * 1.5, 450, 1500),
+    gyroMax: clamp(pct(tapTurning, 0.9) * 1.5, 40, 200),
+  };
+  if (peaks.length < 6) warnings.push('I only felt a few of the taps. Try again and tap a little firmer.');
+  return { settings, warnings };
+}
+
+/**
+ * Raw band samples in, finished gestures out. `step` is the newest fused sample (for a live
+ * picture), `reading` is true while a gesture is being cut, `ready` once the arm was still long enough.
+ */
 export class MotionReader {
-  constructor() { this.smoother = new Smoother(); this.fusion = new Fusion(); this.segmenter = new Segmenter(); }
-  reset() { this.smoother.reset(); this.segmenter.reset(); this.fusion.lastT = null; }   // keeps the learned bias
+  constructor(tapSettings = TAP_DEFAULTS) {
+    this.smoother = new Smoother(); this.fusion = new Fusion(); this.segmenter = new Segmenter();
+    this.step = null; this.tap = null; this.tapTimes = [];
+    this.setTaps(tapSettings);
+  }
+  setTaps(settings) { this.tapSettings = { ...TAP_DEFAULTS, ...settings }; this.taps = new TapDetector(this.tapSettings); }
+  reset() { this.smoother.reset(); this.segmenter.reset(); this.taps.reset(); this.fusion.lastT = null; this.step = null; this.tapTimes = []; }   // keeps the learned bias
+  get reading() { return this.segmenter.samples !== null; }
+  get ready() {
+    const s = this.segmenter;
+    return !this.reading && this.step !== null && s.stillSince !== null && s.busySince === null && this.step.t - s.stillSince >= STILL_BEFORE_MS;
+  }
+  /** Returns a finished movement gesture or null. A tap found in this sample is in `this.tap`. */
   feed(raw) {
+    this.tap = this.taps.feed(raw);
+    if (this.tap) {
+      this.tapTimes.push(this.tap.t);
+      while (this.tapTimes.length > 20) this.tapTimes.shift();
+    }
     const step = this.smoother.feed(raw);
-    return step ? this.segmenter.feed(this.fusion.feed(step)) : null;
+    if (!step) return null;
+    this.step = this.fusion.feed(step);
+    const gesture = this.segmenter.feed(this.step);
+    if (gesture && onlyTaps(gesture, this.tapTimes, this.tapSettings.gyroMax)) return null;   // the taps handle it
+    return gesture;
   }
 }
 

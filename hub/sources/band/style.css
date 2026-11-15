@@ -63,3 +63,17 @@ details input[type="number"] { font: inherit; width: 5em; padding: 2px 6px; }
 canvas { display: block; width: 100%; height: auto; border-radius: 8px; background: #0d1117; margin: 8px 0; }
 pre { max-height: 220px; overflow: auto; font-size: 0.75rem; background: var(--card); padding: 8px; border-radius: 8px; white-space: pre-wrap; }
 #light { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line); vertical-align: -2px; background: #000; }
+
+/* Live waves */
+#waves { margin-top: 16px; }
+#waves canvas { margin: 0; }
+#wave-state { margin: 4px 0 0; }
+#wave-state.ready { color: var(--good); }
+#wave-state.reading { color: var(--accent); font-weight: 600; }
+
+/* Teach: the countdown line */
+.phase { font-size: 2.4rem; font-weight: 700; min-height: 1.3em; margin: 8px 0; transition: color 0.15s; }
+.phase.wait { color: var(--soft); }
+.phase.go { color: var(--accent); animation: pop 0.25s ease-out; }
+@keyframes pop { from { transform: scale(0.85); } to { transform: none; } }
+.tile small { font-size: 0.7rem; color: var(--soft); }

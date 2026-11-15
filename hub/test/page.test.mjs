@@ -1,5 +1,7 @@
-// The band page in headless Chrome with the pretend band, against the real hub/server.py.
-//   node --test hub/test/page.test.mjs        (needs Chrome; skipped without it)
+// The band page in headless Chrome with the pretend band, against the real hub/server.py:
+// calibrate, teach a movement and two tap words (fast and slow taps mixed), recognise each,
+// cancel with 2 taps, reject an untaught motion.
+//   node --test hub/test/page.test.mjs        (needs Chrome; skipped without it; about 100 s)
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -9,6 +11,8 @@ import { skip, startChrome, sleep } from '../../vexo-open-kit/projects/test/chro
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const PORT = 8200 + Math.floor(Math.random() * 500);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+const t0 = Date.now();
+const at = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(5) + 's';
 let server, chrome;
 
 before(async () => {
@@ -25,51 +29,58 @@ after(async () => {
   server?.kill();
 });
 
-const sent = () => fetch(`${ORIGIN}/api/messages`).then((r) => r.json());
-
-test('record two words, recognise them, cancel one, triple-tap Help, the words reach the server', { skip, timeout: 120000 }, async () => {
+test('calibrate, teach, recognise movements and tap counts, cancel', { skip, timeout: 240000 }, async () => {
   const page = await chrome.openPage(`${ORIGIN}/hub/sources/band/?link=pretend`);
   await page.run('localStorage.clear()');
-  assert.equal(await page.run('document.querySelector("#number").value'), '44');
-  await page.connectPretend();
-  assert.match(await page.text('#message'), /Vexo-HACK-44/);
+  await page.click('#connect');
+  const txt = (s) => page.text(s);
+  await page.until('calib view', '!document.querySelector("#calib-view").hidden');
+  console.log(at(), 'calibration:', await txt('#calib-title'));
+  await page.untilText('#calib-title', /slowly/, 6000);
+  await page.click('#pretend-taps3slow'); await sleep(2200); await page.click('#pretend-taps3slow');
+  await page.untilText('#calib-title', /quickly/, 6000); console.log(at(), 'slow taps felt -> next step');
+  await page.click('#pretend-taps3'); await sleep(700); await page.click('#pretend-taps3');
+  await page.untilText('#calib-title', /move your arm/, 6000); console.log(at(), 'fast taps felt -> next step');
+  await page.click('#pretend-circle'); await sleep(1500); await page.click('#pretend-shake');
+  await page.untilText('#calib-title', /Calibrated/, 8000); console.log(at(), 'Calibrated |', await txt('#calib-hint'));
+  await page.until('teach view', '!document.querySelector("#teach-view").hidden', 6000);
 
-  const row = (i) => `#words tr:nth-child(${i + 1})`;
-  const examples = (i) => page.text(`${row(i)} td:nth-child(2)`);
-  async function teach(i, move) {
-    await page.click(`${row(i)} td:nth-child(3) button`);           // record
-    for (const left of [2, 1, 0]) {
-      await page.click(`#pretend-${move}`);
-      await page.until(`${move} recorded`, `/^(recording, ${left} to go|3)$/.test(document.querySelector("${row(i)} td:nth-child(2)").textContent)`);
-      await sleep(400);                                             // the rest after the motion
+  async function teachWord(buttons) {
+    for (let k = 0; k < 3; k++) {
+      await page.until('Go', '/^Go/.test(document.querySelector("#teach-phase").textContent)', 9000);
+      await page.click(`#pretend-${buttons[k]}`);
+      await page.until(`try ${k + 1}`, `document.querySelectorAll('#teach-dots .done').length >= ${k + 1} || /Got it ✓/.test(document.querySelector('#teach-phase').textContent) || /Let’s|Pick|already/.test(document.querySelector('#teach-note').textContent)`, 9000);
+      console.log(at(), '  ', buttons[k], '->', await txt('#teach-note') || await txt('#teach-phase'));
     }
-    assert.equal(await examples(i), '3');
   }
-  await teach(0, 'circle');                                         // Water
-  await teach(1, 'shake');                                          // Food
-  await page.untilText(`${row(0)} td:nth-child(6)`, /^ok 3\/3$/);
-  await page.untilText(`${row(1)} td:nth-child(6)`, /^ok 3\/3$/);
-
-  // Recognise and send
-  await page.click('#pretend-circle');
-  await page.untilText('#status', /Water\?$/);
-  await page.untilText('#status', /Water: sent$/, 6000);
-  await page.click('#pretend-shake');
-  await page.untilText('#status', /Food\?$/);
-  // Double-tap cancels it
-  await page.click('#pretend-double');
-  await page.untilText('#status', /^Cancelled$/);
-  await sleep(2500);
-  // A motion nobody recorded
-  await page.click('#pretend-punch');
-  await page.untilText('#status', /^Not sure$/);
-  // Three taps: Help, at once
-  await sleep(2100);
-  for (const kind of ['tap', 'tap', 'tap']) { await page.click(`#pretend-${kind}`); await sleep(150); }
-  await page.untilText('#status', /Help: sent$/);
-
-  const words = (await sent()).map((m) => `${m.id}/${m.via}`);
-  assert.deepEqual(words, ['water/gesture', 'help/taps']);
-  assert.deepEqual(await page.run('JSON.parse(localStorage.getItem("epsilon-examples-v1")).water.length'), 3, 'examples kept for a reload');
+  console.log(at(), await txt('#teach-title')); await teachWord(['circle', 'circle', 'circle']);
+  await page.untilText('#teach-title', /Food/, 4000);
+  console.log(at(), await txt('#teach-title')); await teachWord(['taps3', 'taps3slow', 'taps3']);
+  await page.untilText('#teach-title', /Parents/, 4000); assert.equal(await page.run('JSON.parse(localStorage.getItem("epsilon-examples-v2")).tapWords.food'), 3, 'fast and slow taps are both 3');
+  console.log(at(), await txt('#teach-title')); await teachWord(['taps2', 'taps2', 'taps2']);
+  await page.untilText('#teach-title', /Sleep/, 4000);
+  for (let i = 0; i < 2; i++) { await page.click('#teach-skip'); await sleep(100); }
+  await page.until('use view', '!document.querySelector("#use-view").hidden', 4000);
+  assert.match(await page.run('[...document.querySelectorAll(".tile")].map(b=>b.textContent).join(" / ")'), /Water.*movement.*Food.*3 taps.*Parents.*2 taps/);
+  console.log(at(), 'USE | tiles:', await page.run('[...document.querySelectorAll(".tile")].map(b=>b.textContent).join(" / ")'));
+  const expect = async (button, re, label) => {
+    await page.untilText('#card-title', /^Ready$/, 8000); await sleep(600); await page.click(`#pretend-${button}`);
+    await page.untilText('#card-title', re, 5000);
+  };
+  await expect('circle', /Water/, 'circle');
+  await page.untilText('#card-title', /sent/, 5000);
+  await expect('taps3slow', /Food/, '3 slow taps');
+  await page.untilText('#card-title', /sent/, 5000);
+  await expect('taps3', /Food/, '3 fast taps');
+  await page.untilText('#card-title', /sent/, 5000);
+  await expect('taps2', /Parents/, '2 taps');
+  await page.untilText('#card-title', /sent/, 5000);
+  await expect('taps4', /4 taps/, '4 taps (no word)');
+  await expect('circle', /Water/, 'circle again');
+  await sleep(200); await page.click('#pretend-taps2');
+  await page.untilText('#card-title', /Cancelled/, 3000); console.log(at(), '2 taps while pending:', await txt('#card-title'));
+  await expect('punch', /catch/, 'punch (untaught)');
+  const sent = (await fetch(`${ORIGIN}/api/messages`).then((r) => r.json())).map((m) => `${m.id}/${m.via}`);
+  assert.deepEqual(sent, ['water/gesture', 'food/taps', 'food/taps', 'parents/taps']);
   assert.deepEqual(page.problems, [], 'no errors in the page');
 });
