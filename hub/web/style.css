@@ -302,3 +302,4 @@ a { color: inherit; }
 .insight-box { display: grid; gap: var(--space-sm); justify-items: start; margin-bottom: var(--space-md); }
 .insight { background: var(--color-paper-2); border-radius: var(--radius-card); padding: var(--space-md); display: grid; gap: var(--space-sm); }
 .insight-by { font-size: var(--text-xs); }
+.note-top { margin-bottom: var(--space-lg); }

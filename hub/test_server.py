@@ -93,6 +93,35 @@ class Token(HubCase):
         e = self.call("POST", "/gesture?k=s3cret", {"gesture": "spoken", "text": "hello", "via": "gesture"})[1]["event"]
         self.assertEqual(e["action"], "held")
 
+    def test_hosted_band_page_may_send_with_the_key(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("OPTIONS", "/gesture", headers={"Origin": "https://band.example", "Access-Control-Request-Method": "POST"})
+        r = c.getresponse(); r.read()
+        self.assertEqual((r.status, r.getheader("Access-Control-Allow-Origin")), (204, "*"))
+        c.request("POST", "/gesture?k=s3cret", json.dumps({"id": "water", "via": "gesture"}),
+                  {"Content-Type": "application/json", "Origin": "https://band.example"})
+        r = c.getresponse(); r.read()
+        self.assertEqual((r.status, r.getheader("Access-Control-Allow-Origin")), (200, "*"))
+        c.request("POST", "/gesture", json.dumps({"id": "water"}), {"Content-Type": "application/json", "Origin": "https://band.example"})
+        r = c.getresponse(); r.read()
+        self.assertEqual(r.status, 401)
+        c.close()
+
+    def test_band_page_is_served_and_its_words_arrive(self):
+        self.assertEqual(self.call("GET", "/hub/sources/band/")[0], 200)
+        self.assertEqual(self.call("GET", "/vexo-open-kit/js/src/index.js")[0], 200)
+        for path in ("/hub/sources/band/../../app.py", "/hub/sources/band/%2e%2e/%2e%2e/app.py", "/vexo-open-kit/README.md",
+                     "/hub/app.py", "/.env"):
+            self.assertEqual(self.call("GET", path)[0], 404, path)
+        self.assertEqual([w["id"] for w in self.call("GET", "/api/info")[1]["messages"]], list(server.DEFAULT_CONFIG["phrases"]))
+        word = {"id": "water", "via": "gesture", "confidence": 0.91, "forward": True}
+        self.assertEqual(self.call("POST", "/api/message", word)[0], 401)  # no key, no cookie
+        cookie = {"Cookie": "ek=s3cret"}
+        status, body = self.call("POST", "/api/message", word, cookie)
+        self.assertEqual((status, body["event"]["gesture"], body["forwarded"][0]["ok"]), (200, "water", True))
+        quiet = self.call("POST", "/api/message", dict(word, forward=False), cookie)[1]
+        self.assertEqual((quiet["forwarded"], "event" in quiet), ([], False))  # teaching: nothing is sent
+
     def test_band_server_forward_shape(self):
         # what hub/server.py --forward posts: the word's id, milliseconds, and the token only in the address
         sent = {"id": "help", "label": "Help", "phrase": "I need help!", "urgent": True, "via": "gesture",
