@@ -84,10 +84,11 @@ def clean_config(b):
     return out
 
 
-def make_server(host, port, data, token="", ask_model=None, speak=None, send=None):
+def make_server(host, port, data, token="", ask_model=None, speak=None, send=None, trust_local=False):
     s = ThreadingHTTPServer((host, port), Handler)
     s.data, s.token, s.lock, s.listeners, s.events = Path(data), token, threading.Lock(), [], []
     s.ask_model, s.speak, s.send = ask_model, speak, send  # None in tests, so they never touch the network
+    s.trust_local = trust_local  # the hub's own computer may send gestures without the key (off in tests)
     s.data.mkdir(parents=True, exist_ok=True)
     try:
         s.config = clean_config(json.loads((s.data / "config.json").read_text(encoding="utf-8")))
@@ -187,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def gesture(self):
         s, raw = self.server, self.read_body(4096)
-        if s.token and not self.has_key():
+        if s.token and not (self.has_key() or (s.trust_local and self.client_address[0] in LOOPBACK)):
             raise Bad(401, "Missing or wrong token (X-Epsilon-Token header, or ?k= in the address).")
         b = parse_obj(raw)
         # the band server forwards {"id": ..., "time": <milliseconds>}; plain clients send {"gesture": ...}
@@ -325,7 +326,7 @@ def main():
     host, port = os.environ.get("EPSILON_HOST", "127.0.0.1"), int(os.environ.get("EPSILON_PORT") or os.environ.get("PORT") or 8787)  # PORT: set by Railway
     data = os.environ.get("EPSILON_DATA") or Path(__file__).resolve().parent.parent / "data"
     srv = make_server(host, port, data, os.environ.get("EPSILON_TOKEN", ""), gemini_ask, speak,
-                      imessage if os.environ.get("EPSILON_IMESSAGE") == "1" else None)
+                      imessage if os.environ.get("EPSILON_IMESSAGE") == "1" else None, trust_local=True)
     print("Epsilon hub listening on http://%s:%d" % srv.server_address[:2], flush=True)
     try:
         srv.serve_forever()
