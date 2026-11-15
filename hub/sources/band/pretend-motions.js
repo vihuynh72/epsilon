@@ -13,5 +13,7 @@ export const PRETEND = {
 // Play it with pretend.playMotion(...PRETEND_TAP), then a rest for the gap to the next tap.
 export const PRETEND_TAP = [(s) => {
   const ms = s * 1000;
-  return { az: 1 + 1.0 * Math.exp(-ms / 6) * Math.cos(2 * Math.PI * ms / 10), gx: 15 * Math.exp(-ms / 10) };
-}, { seconds: 0.04 }];
+  const ring = (d, a) => (d >= 0 && d < 60 ? a * Math.exp(-d / 10) * Math.cos(2 * Math.PI * d / 28) : 0);
+  // like band 44's real taps: the hit, a rebound at 120 ms, a small spike at 190 ms, a wrist jolt
+  return { az: 1 + ring(ms, 2.4) + ring(ms - 120, 1.4) + ring(ms - 190, 0.24), gx: ms < 200 ? 800 * Math.exp(-ms / 40) * Math.sin(2 * Math.PI * ms / 80) : 0 };
+}, { seconds: 0.25 }];

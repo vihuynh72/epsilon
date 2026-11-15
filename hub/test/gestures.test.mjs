@@ -140,14 +140,16 @@ test('taps: three in 2 s is Help; a double-tap counts as two', () => {
 // --- taps ---------------------------------------------------------------------------------
 import { readFileSync } from 'node:fs';
 import { TapDetector, TapSequencer, calibrate, TAP_DEFAULTS } from '../sources/band/gestures.js';
+import * as imports from '../sources/band/gestures.js';
 
 /**
- * Raw 416/s samples with taps shaped like band 44's real ones: the hit (a 10 ms ringing spike),
+ * Raw 416/s samples with taps shaped like band 44's real ones: the hit (a ~15 ms ringing spike),
  * a rebound 120 ms later at 60 %, a small spike at 190 ms, and the wrist jolting at ~800 deg/s.
  */
 function tapSamples(taps, { seconds = 3, amp = 2.4, noise = 0.01, move = null } = {}) {
   const out = [];
-  const ring = (d, a) => (d >= 0 && d < 40 ? a * Math.exp(-d / 6) * Math.cos(2 * Math.PI * d / 10) : 0);
+  // ~15 ms wide at half height, like band 44's real hits (13-26 ms)
+  const ring = (d, a) => (d >= 0 && d < 60 ? a * Math.exp(-d / 10) * Math.cos(2 * Math.PI * d / 28) : 0);
   for (let i = 0; i < seconds * 416; i++) {
     const t = (i * 1000) / 416;
     const s = { t: 10000 + t, ...REST };
@@ -229,4 +231,25 @@ test('reader: taps do not come out as movement gestures; a real movement still d
   assert.deepEqual(read(tapSamples([1200, 1450, 1700], { seconds: 3 }), reader), [], 'taps only');
   const found = read(samples(...PRETEND.circle).map((s) => ({ ...s, t: s.t + 20000 })), reader);
   assert.equal(found.length, 1, 'the circle after them');
+});
+
+test('teaching: a window of taps counts as taps, a window with a movement does not', () => {
+  const { tapsOnly } = imports;
+  const windowOf = (list, settings) => {
+    const reader = new MotionReader(settings), steps = [], taps = [];
+    for (const s of list) { reader.feed(s); if (reader.tap) taps.push(reader.tap.t); if (reader.step && steps.at(-1) !== reader.step) steps.push(reader.step); }
+    return { steps, taps };
+  };
+  for (const n of [1, 2, 3, 5]) {
+    const w = windowOf(tapSamples(Array.from({ length: n }, (_, k) => 500 + k * 300)));
+    assert.equal(w.taps.length, n, `${n} taps felt`);
+    assert.ok(tapsOnly(w.steps, w.taps, TAP_DEFAULTS.ringMs, 300), `${n} taps are taps`);
+  }
+  const rec = JSON.parse(readFileSync(new URL('./fixtures/taps-band44.json', import.meta.url), 'utf8'));
+  const { settings } = calibrate(rec.steps);
+  const real = windowOf(rec.steps.slow.map((r) => ({ t: r[0], ax: r[1], ay: r[2], az: r[3], gx: r[4], gy: r[5], gz: r[6] })), settings);
+  assert.equal(real.taps.length, 5);
+  assert.ok(tapsOnly(real.steps, real.taps, settings.ringMs, 300), 'the real slow taps are taps');
+  const circle = windowOf(samples(...PRETEND.circle));
+  assert.ok(!tapsOnly(circle.steps, [circle.steps[60].t], TAP_DEFAULTS.ringMs, 300), 'a circle with a tap in it is a movement');
 });

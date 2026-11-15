@@ -208,7 +208,8 @@ export const TAP_DEFAULTS = {
   calmGyro: 80,         // deg/s: the arm must turn slower than this just before a tap
 };
 const SPIKE_MS = 15;      // the smoothing the spike is measured against
-const SPIKE_MAX_MS = 70;  // a hit is narrower; a longer spike is a push or a swing
+const SPIKE_MAX_MS = 90;  // a hit is narrower (13-26 ms, plus the hold); a longer spike is a push or a swing
+const SPIKE_HOLD_MS = 15; // a hit rings, so it is over only after staying low this long
 const LONG_MAX_MS = 250;  // after a long push, look for taps again after this at the latest
 const CALM_FROM = 150, CALM_TO = 25;   // ms before the hit that must be calm
 
@@ -246,10 +247,10 @@ export class TapDetector {
     const { threshold } = this.settings;
     if (this.open) {                                   // inside a spike: follow it to its top
       this.open.peak = Math.max(this.open.peak, this.impulse);
-      if (this.impulse >= threshold * 0.5) {
-        if (s.t - this.open.t > SPIKE_MAX_MS) { this.open = null; this.long = s.t; }   // too wide for a hit
-        return null;
-      }
+      if (s.t - this.open.t > SPIKE_MAX_MS) { this.open = null; this.long = s.t; return null; }   // too wide for a hit
+      if (this.impulse >= threshold * 0.5) { this.open.low = null; return null; }
+      this.open.low ??= s.t;
+      if (s.t - this.open.low < SPIKE_HOLD_MS) return null;       // a dip inside the ringing, not the end
       const spike = this.open;
       this.open = null;
       return this.decide(spike);
@@ -300,10 +301,12 @@ export class TapSequencer {
  * Is this stretch of fused steps only taps? True when there were taps and every moment the
  * band moved lies inside a tap's ring (so the "movement" is just the taps shaking the band).
  */
-export function tapsOnly(steps, tapTimes, ringMs = TAP_DEFAULTS.ringMs) {
+export function tapsOnly(steps, tapTimes, ringMs = TAP_DEFAULTS.ringMs, slackMs = 0) {
+  if (!steps.length) return false;
   const inside = tapTimes.filter((t) => t >= steps[0].t - ringMs && t <= steps.at(-1).t + 80);
   if (!inside.length) return false;
-  return steps.every((f) => !isBusy(f) || inside.some((t) => f.t >= t - 60 && f.t <= t + ringMs + 120));
+  const outside = steps.filter((f) => isBusy(f, true) && !inside.some((t) => f.t >= t - 60 && f.t <= t + ringMs + 120));
+  return outside.length * STEP_MS <= slackMs;      // moving clearly outside the taps for longer = a movement
 }
 
 /**

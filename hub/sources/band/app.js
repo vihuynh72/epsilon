@@ -11,7 +11,7 @@
 import { $, say, attempt, onConnect } from '../../../vexo-open-kit/projects/shared/page.js';
 import {
   MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes,
-  cutWindow, isBusy, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
+  cutWindow, isBusy, tapsOnly, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
 
@@ -88,7 +88,7 @@ function useTapSettings(settings) {
   reader.setTaps(settings);
   sequence = new TapSequencer(settings);
   const s = settings;
-  log(`taps: threshold ${s.threshold.toFixed(2)} g, fastest ${Math.round(s.refractoryMs * 2)} ms apart, gap ${Math.round(s.maxGapMs)} ms ends a sequence`);
+  log(`taps: threshold ${s.threshold.toFixed(2)} g, one tap rings ${Math.round(s.ringMs)} ms, a gap of ${Math.round(s.maxGapMs)} ms ends a sequence`);
 }
 if (tapSettings) useTapSettings(tapSettings);
 
@@ -302,9 +302,8 @@ function finishTry() {
   if (!teaching || teaching.phase !== 'go') return;
   clearTimeout(teaching.timer);
   teaching.phase = 'pause';
-  const turning = Math.max(0, ...teaching.capture.map((f) => Math.hypot(f.gx, f.gy, f.gz)));
   let tryOut = null;
-  if (teaching.taps.length && turning <= sequence.settings.gyroMax * 1.3) {
+  if (teaching.taps.length && tapsOnly(teaching.capture, teaching.taps, sequence.settings.ringMs, 300)) {
     tryOut = { taps: teaching.taps.length };
   } else {
     const cut = cutWindow(teaching.capture);
@@ -637,6 +636,7 @@ onConnect(async (theBand, pretend) => {
     const tapRun = (n, gap) => () => {
       for (let k = 0; k < n; k++) { pretend.playMotion(...PRETEND_TAP); pretend.playMotion({}, { seconds: gap }); }
     };
+    button('pretend-taps1', '1 tap', tapRun(1, 0.1));
     button('pretend-taps2', '2 taps', tapRun(2, 0.15));
     button('pretend-taps3', '3 fast taps', tapRun(3, 0.12));
     button('pretend-taps3slow', '3 slow taps', tapRun(3, 0.6));
