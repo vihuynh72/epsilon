@@ -4,7 +4,7 @@ import { Spectrum, voice } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 
 // optional third argument: path of an audio file, sent as a voice message after the text (urgent messages)
-const [to, text, audio] = process.argv.slice(2);
+const [to, text, audio, seconds] = process.argv.slice(2);
 if (!to || !text) {
   console.error("usage: bun src/send.ts <phone or iMessage email> <text>");
   process.exit(2);
@@ -18,5 +18,14 @@ const app = await Spectrum({
 const im = imessage(app);
 const space = await im.space.create(await im.user(to));
 await space.send(text);
-if (audio) await space.send(voice(audio));
+if (audio) {
+  const bytes = await Bun.file(audio).bytes();
+  const m4a = audio.endsWith(".m4a");
+  // name, type and length are given outright: without them iMessage showed an empty 00:00 player
+  await space.send(voice(Buffer.from(bytes), {
+    name: m4a ? "message.m4a" : "message.mp3",
+    mimeType: m4a ? "audio/mp4" : "audio/mpeg",
+    duration: Number(seconds) || undefined,
+  }));
+}
 process.exit(0);

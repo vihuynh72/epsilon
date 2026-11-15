@@ -41,8 +41,18 @@ def imessage(to, text, audio=None):
     """True if the Bun sender in imessage/ accepted the text (and the voice message, if any). Off unless EPSILON_IMESSAGE=1."""
     if "@" not in to:  # a phone number as a parent types it: "+1 (415) 555-0100" -> "+14155550100"
         to = "".join(ch for ch in to if ch.isdigit() or ch == "+")
+    extra = []
+    if audio:  # iMessage plays a voice message only in Apple's own format, and shows 00:00 for an mp3
+        clip, seconds = Path(str(audio)).with_suffix(".m4a"), "0"
+        try:
+            subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", str(audio), str(clip)], check=True, timeout=20, capture_output=True)
+            info = subprocess.run(["afinfo", str(clip)], capture_output=True, timeout=10).stdout.decode(errors="replace")
+            seconds = next((l.split()[2] for l in info.splitlines() if l.strip().startswith("estimated duration:")), "0")
+        except (OSError, subprocess.SubprocessError):
+            clip = audio  # not a Mac: send the mp3 as it is
+        extra = [str(clip), seconds]
     try:
-        r = subprocess.run(["bun", "src/send.ts", to, text] + ([str(audio)] if audio else []), cwd=IMESSAGE, timeout=40,
+        r = subprocess.run(["bun", "src/send.ts", to, text] + extra, cwd=IMESSAGE, timeout=40,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     except (OSError, subprocess.TimeoutExpired) as e:
         print("epsilon: iMessage not sent: %s" % type(e).__name__, flush=True)
