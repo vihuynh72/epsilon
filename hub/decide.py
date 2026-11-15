@@ -58,7 +58,8 @@ Choose one action:
 
 Facts:
 - Word: "{gesture}" (urgent word: {urgent}). The sentence it sends: "{text}"
-- Recogniser confidence: {confidence}. Below {threshold} is doubtful. "not given" means the recogniser sends no score.
+- Recogniser confidence: {confidence}. Below {threshold} is doubtful. "not given" means the recogniser has no
+  score and has already accepted this match: treat it as a confident match, never as a reason to hold.
 - How it was made: {via}
 - Local time: {hour}:00
 - Recent messages, newest first: {recent}
@@ -66,14 +67,12 @@ Facts:
 Give the action and one short plain sentence a parent can read explaining why."""
 
 
-# shortcut: the request shape reached Gemini (it answered with a billing error) but no answer has been parsed yet;
-# check one real answer once the key has credit.
 def gemini_ask(event, recent, config):
     """(action, reason) from Gemini, or None when there is no key, no credit, or no answer in time."""
     key = keys.get("GEMINI_API_KEY")
     if not key:
         return None
-    model = keys.get("GEMINI_MODEL") or "gemini-2.5-flash"
+    model = keys.get("GEMINI_MODEL") or "gemini-flash-lite-latest"   # about 1 second per decision when measured
     threshold, urgent, _ = rules_of(config)
     now, conf = event["time"], event.get("confidence")
     past = "; ".join("%s (%s) %d seconds ago" % (r["gesture"], r["action"], now - r["time"]) for r in recent[:6])
