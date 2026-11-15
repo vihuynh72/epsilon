@@ -1,6 +1,6 @@
 // The Sounds page: teach a wearer's own sounds, then listen and suggest what one may mean.
 // Every server string is untrusted: textContent only. Nothing listens until a person presses a button.
-import { BANDS, fingerprint, match } from "/static/sound-match.js";
+import { BANDS, fingerprint, match, wordIn } from "/static/sound-match.js";
 
 const $ = (id) => document.getElementById(id);
 const K = new URLSearchParams(location.search).get("k");
@@ -190,6 +190,15 @@ async function listen() {
     const d = await post("/api/transcribe", got.audio, true);
     if (latest !== attempt) return; // a newer try is on screen
     attempt.heard = (d.text || "").trim().toLowerCase();
+    // a clearly spoken word that is one of the family's words: offer to send it, even if no sound was taught
+    const said = d.ok ? wordIn(attempt.heard, Object.keys(words)) : null;
+    if (said && !(m.sure && m.meaning === said)) {
+      $("result-text").textContent = "Heard the word: " + label(said);
+      const b = el("button", "btn btn-primary", "Yes, send " + label(said));
+      b.type = "button";
+      b.onclick = () => settle(said, said, Object.assign(attempt, { sure: true, score: 1 }), true);
+      $("result-actions").prepend(b);
+    }
     const votes = heardVotes[attempt.heard];
     const learned = votes ? Object.entries(votes).sort((a, b) => b[1] - a[1])[0] : null;
     $("result-heard").textContent = !d.ok ? (d.error || "Deepgram did not answer.")

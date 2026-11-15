@@ -61,3 +61,10 @@ export function match(print, examples) {
   const runnerUp = ranked.length > 1 ? ranked[1][1] : 0;
   return { meaning, score, runnerUp, sure: score >= ACCEPT && score - runnerUp >= MARGIN };
 }
+
+/** The taught word that was spoken, if the written-down speech contains exactly one of them. Otherwise null. */
+export function wordIn(heard, words) {
+  const said = String(heard || "").toLowerCase().split(/[^a-z0-9']+/);
+  const found = words.filter((w) => said.includes(w.toLowerCase()));
+  return found.length === 1 ? found[0] : null; // two different words in one breath is not a clear request
+}
