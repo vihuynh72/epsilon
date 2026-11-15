@@ -58,3 +58,40 @@ def ring(to, audio_url):
     except Exception as e:
         print("ring failed: %s" % type(e).__name__, flush=True)
     return False
+
+
+def guess_word(audio, mime, words):
+    """Ask Gemini to listen to one short recording and say which of the family's words it most likely is.
+    For speech that is unclear or unusual. Returns {"word": one of words or "unsure", "confidence": 0..1,
+    "heard": str} or None. The answer is only ever a suggestion: a person confirms it before anything is sent."""
+    import base64
+    import json
+    key = keys.get("GEMINI_API_KEY")
+    if not key or not audio or not words:
+        return None
+    model = keys.get("GEMINI_AUDIO_MODEL") or "gemini-flash-latest"
+    prompt = ("This is a short recording of one person trying to say ONE of these words: %s. "
+              "They may speak unclearly, slowly, or pronounce it in an unusual way, for example only the vowels "
+              "or only the first sound. Decide which word it most likely is. If it is silence, noise, or could "
+              "be two of the words equally, answer \"unsure\". Give your confidence from 0 to 1, and write "
+              "in `heard` roughly what it sounded like." % ", ".join(words))
+    body = {"contents": [{"parts": [{"inline_data": {"mime_type": mime, "data": base64.b64encode(audio).decode()}},
+                                    {"text": prompt}]}],
+            "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": {
+                "type": "OBJECT", "required": ["word", "confidence", "heard"], "properties": {
+                    "word": {"type": "STRING", "enum": list(words) + ["unsure"]},
+                    "confidence": {"type": "NUMBER"}, "heard": {"type": "STRING"}}}}}
+    req = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+        data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            out = json.loads(json.load(r)["candidates"][0]["content"]["parts"][0]["text"])
+        conf = out.get("confidence")
+        return {"word": out["word"], "heard": str(out.get("heard", ""))[:120],
+                "confidence": max(0.0, min(1.0, float(conf))) if isinstance(conf, (int, float)) else 0.0}
+    except urllib.error.HTTPError as e:
+        print("guess_word failed: HTTP %d" % e.code, flush=True)
+    except Exception as e:
+        print("guess_word failed: %s" % type(e).__name__, flush=True)
+    return None

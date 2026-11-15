@@ -67,6 +67,30 @@ async function record(wantAudio, onStart) {
   }
 }
 
+/** The recording as a small WAV file (16 kHz, one channel): the form both listening services accept. */
+async function toWav(blob) {
+  const ctx = new AudioContext();
+  try {
+    const heard = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const off = new OfflineAudioContext(1, Math.ceil(heard.duration * 16000), 16000);
+    const src = off.createBufferSource();
+    src.buffer = heard;
+    src.connect(off.destination);
+    src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const view = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+    const text = (at, s) => [...s].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+    text(0, "RIFF"); view.setUint32(4, 36 + pcm.length * 2, true); text(8, "WAVEfmt ");
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    text(36, "data"); view.setUint32(40, pcm.length * 2, true);
+    pcm.forEach((v, i) => view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 32767, true));
+    return new Blob([view], { type: "audio/wav" });
+  } finally {
+    ctx.close();
+  }
+}
+
 async function capture(statusEl, wantAudio) {
   if (busy) return null;
   busy = true;
@@ -188,9 +212,19 @@ async function listen() {
   actions.append(none);
 
   if (got.audio) {
-    $("result-heard").textContent = "Asking Deepgram…";
-    const d = await post("/api/transcribe", got.audio, true);
+    $("result-heard").textContent = "Gemini and Deepgram are listening…";
+    const clip = await toWav(got.audio).catch(() => got.audio); // if the browser cannot convert it, send it as it is
+    const [d, g] = await Promise.all([post("/api/transcribe", clip, true), post("/api/guess", clip, true)]);
     if (latest !== attempt) return; // a newer try is on screen
+    // Gemini heard the recording itself: for speech that is unclear or said in the person's own way
+    if (g.ok && g.word && g.word !== "unsure" && g.word in words && !(m.sure && m.meaning === g.word)) {
+      $("result-text").textContent = "Gemini thinks this may be: " + label(g.word);
+      $("result-detail").textContent = "It sounded like “" + (g.heard || "?") + "” (" + Math.round((g.confidence || 0) * 100) + "% sure). Say yes and Epsilon learns this sound for next time.";
+      const yes = el("button", "btn btn-primary", "Yes, send " + label(g.word));
+      yes.type = "button";
+      yes.onclick = () => settle(g.word, g.word, Object.assign(attempt, { sure: true, score: Math.round((g.confidence || 0) * 100) / 100 }), true);
+      $("result-actions").prepend(yes);
+    }
     attempt.heard = (d.text || "").trim().toLowerCase();
     // a clearly spoken word that is one of the family's words: offer to send it, even if no sound was taught
     const said = d.ok ? wordIn(attempt.heard, Object.keys(words)) : null;
@@ -235,3 +269,6 @@ fetch(withKey("/api/state"), { cache: "no-store" }).then((r) => r.json()).then((
   renderTeach();
 }).catch(() => { $("teach-error").textContent = "Could not load the list of meanings from the hub."; });
 fetch(withKey("/api/sound-log")).then((r) => r.json()).then(showStats).catch(() => {});
+// remember the choice to use the online listeners, so a family sets it once
+try { $("use-deepgram").checked = localStorage.getItem("epsilon.listeners") === "on"; } catch { /* private window */ }
+$("use-deepgram").onchange = () => { try { localStorage.setItem("epsilon.listeners", $("use-deepgram").checked ? "on" : "off"); } catch { /* private window */ } };
