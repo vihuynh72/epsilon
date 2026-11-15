@@ -10,7 +10,7 @@
 // The maths is in gestures.js; this file is only the page and the band.
 import { $, say, attempt, onConnect } from '../../../vexo-open-kit/projects/shared/page.js';
 import {
-  MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes, confidenceOf,
+  MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes, confidenceOf, bigEnough,
   cutWindow, isBusy, tapsOnly, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
@@ -135,7 +135,7 @@ function line(el, text, kind = '') {
 // steps fill dots as taps are felt and end early once all were felt. Everything recorded is
 // saved to data/recordings/ on this laptop, so it can be studied and used as test data.
 const CALIB_STEPS = [
-  { key: 'still', icon: '', title: 'Hold the band still', hint: 'Rest your arm', ms: 3000 },
+  { key: 'still', icon: '', title: 'Wear the band and rest your arm', hint: 'Calibrate on the wrist, not on a table', ms: 3000 },
   { key: 'slow', icon: '👆', title: 'Tap the band 5 times, slowly', hint: 'About one tap a second.', taps: 5, ms: 9000 },
   { key: 'fast', icon: '⚡', title: 'Now tap 5 times, quickly', hint: 'As fast as feels natural.', taps: 5, ms: 6000 },
   { key: 'move', icon: '👋', title: 'Now move your arm around', hint: 'Like usual, no taps', ms: 4000 },
@@ -147,7 +147,7 @@ const MOVES = [
   ['twist', '🔄', 'Twist your wrist and back'], ['circle', '⭕', 'Draw a circle in the air'],
 ];
 const REFERENCE_STEPS = [
-  { key: 'still', icon: '✋', title: 'Rest your arm', hint: 'Don’t move.', ms: 4000 },
+  { key: 'still', icon: '✋', title: 'Wear the band and rest your arm', hint: 'Record on the wrist, not on a table', ms: 4000 },
   { key: 'still-air', icon: '🖐️', title: 'Hold your arm up in front of you', hint: 'Keep it still.', ready: 2000, ms: 4000 },
   { key: 'soft', icon: '🪶', title: 'Tap 5 times, softly', hint: 'The softest tap you would use.', taps: 5, ms: 9000 },
   { key: 'hard', icon: '💥', title: 'Tap 5 times, hard', hint: 'A firm tap.', taps: 5, ms: 9000 },
@@ -332,7 +332,16 @@ function finishTry() {
     tryOut = { taps: teaching.taps.length };
   } else {
     const cut = cutWindow(teaching.capture);
-    if (cut) tryOut = { shape: toShape(cut), ms: Math.round(cut.at(-1).t - cut[0].t) };
+    if (cut) {
+      const size = bigEnough(cut);
+      if (!size.ok) {
+        log(`  too small: ${Math.round(size.turnDeg)}°, ${size.speed.toFixed(3)} g·s`);
+        rec.event({ kind: 'teach-small', word: teaching.queue[teaching.i], turnDeg: size.turnDeg, speed: size.speed }, [cut[0].t, cut.at(-1).t]);
+        line($('#teach-note'), 'Too small. Make the movement bigger', 'bad');
+        return pause();
+      }
+      tryOut = { shape: toShape(cut), ms: Math.round(cut.at(-1).t - cut[0].t) };
+    }
   }
   if (!tryOut) {
     log('  nothing');

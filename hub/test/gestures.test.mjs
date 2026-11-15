@@ -326,3 +326,11 @@ test('confidence: clear matches pass the guardian app (>= 0.8), doubtful ones do
   assert.ok(confidenceOf({ id: 'x', best: { score: 0.3 }, next: { score: 0.4 } }) < 0.8, 'runner-up close behind');
   assert.equal(confidenceOf({ id: null }), 0);
 });
+
+test('size: a bump or fidget (a few degrees) is never a gesture; deliberate movements are', () => {
+  const { bigEnough } = imports;
+  const bump = [(s) => ({ gx: 30 * Math.sin(Math.PI * s / 0.3), ax: 0.1 * Math.sin(2 * Math.PI * s / 0.3) }), 0.3];   // ~5 degrees
+  assert.equal(read(samples(...bump)).length, 0, 'a bump is ignored');
+  for (const d of Object.keys(DIRS)) assert.equal(read(worldMove(d)).length, 1, `${d} still counts`);
+  for (const m of MOVES) assert.ok(bigEnough(read(samples(...PRETEND[m]))[0]).ok, `${m} is big enough`);
+});

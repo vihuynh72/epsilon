@@ -353,7 +353,7 @@ export function calibrate({ still = [], slow = [], fast = [], move = [], more = 
   const fastGap = pct(gaps(fastTaps), 0.1);
   const strongRing = ring.filter((r) => r.ratio > 0.1);
   const settings = {
-    threshold: clamp(Math.max(noise * 5, pct(hits, 0.1) * 0.4), 0.25, 3) || TAP_DEFAULTS.threshold,
+    threshold: clamp(Math.max(noise * 5, pct(hits, 0.1) * 0.4), 0.15, 3) || TAP_DEFAULTS.threshold,   // taps on a wrist are much softer than on a desk
     rebound: clamp(Math.max(...ring.map((r) => r.ratio), 0) + 0.15, 0.6, 0.92) || TAP_DEFAULTS.rebound,
     ringMs: clamp(Math.min(Math.max(...strongRing.map((r) => r.dt), 150) + 40, or(fastGap, Infinity) * 0.8), 150, 350) || TAP_DEFAULTS.ringMs,
     maxGapMs: clamp(slowGap * 1.4, 450, 1500) || TAP_DEFAULTS.maxGapMs,
@@ -391,7 +391,11 @@ export class MotionReader {
     if (!step) return null;
     this.step = this.fusion.feed(step);
     const gesture = this.segmenter.feed(this.step);
-    if (gesture && tapsOnly(gesture, this.tapTimes, this.tapSettings.ringMs)) return null;   // the taps handle it
+    if (!gesture) return null;
+    if (tapsOnly(gesture, this.tapTimes, this.tapSettings.ringMs)) return null;   // the taps handle it
+    this.small = bigEnough(gesture);
+    if (!this.small.ok) return null;                                             // a bump or a fidget, not a gesture
+    this.small = null;
     return gesture;
   }
 }
@@ -457,6 +461,20 @@ export function relative(gesture) {
   const t0 = out[0].t, span = Math.max(1, out.at(-1).t - t0), drift = out.at(-1).speed;
   for (const o of out) o.speed = o.speed.map((v, k) => v - drift[k] * ((o.t - t0) / span));
   return out;
+}
+
+// Measured on band 44 (data/recordings, session 2026-11-14 17:01): deliberate movements turned the
+// wrist 29-66 degrees or moved the hand at 0.04-0.09 g·s; bumps and fidgets turned 1-10 degrees
+// at 0.00-0.02 g·s. Anything that small is never read as a word, and is refused while teaching.
+export const MIN_TURN_DEG = 20;
+export const MIN_SPEED = 0.035;
+
+/** Is this movement big enough to be a deliberate gesture? { ok, turnDeg, speed } */
+export function bigEnough(gesture) {
+  const rel = relative(gesture);
+  const turnDeg = (Math.max(...rel.map((o) => Math.hypot(...o.turn))) * 180) / Math.PI;
+  const speed = Math.max(...rel.map((o) => Math.hypot(...o.speed)));
+  return { ok: turnDeg >= MIN_TURN_DEG || speed >= MIN_SPEED, turnDeg, speed };
 }
 
 /** A movement as POINTS x FEATURES numbers (speed, turn, push), spread evenly over its time. */
