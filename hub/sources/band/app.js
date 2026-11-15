@@ -105,6 +105,7 @@ const rec = new Recorder({ log: (l) => log(l), context: () => ({ band: BAND, tap
 try { rec.fullLog = localStorage.getItem('epsilon-full-log') !== 'off'; } catch { /* private window */ }
 if (HOSTED) { rec.offline = true; rec.fullLog = false; }
 $('#download').hidden = !HOSTED;
+rec.onOffline = () => { $('#download').hidden = false; $('#full-log').checked = false; };
 $('#download').onclick = () => rec.download();
 
 // --- state -----------------------------------------------------------------------------------
@@ -249,12 +250,13 @@ function endCalibStep() {
 }
 /** Send the raw recording to the server (saved in data/recordings/, never leaves this laptop). */
 function saveRecording(name, raw, settings) {
-  if (HOSTED) return rec.keep(name, { band: BAND, columns: ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'], steps: raw, settings });
+  const data = { band: BAND, columns: ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'], steps: raw, settings };
+  if (HOSTED || rec.offline) return rec.keep(name, data);
   fetch(`/api/recording?name=${name}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
     body: JSON.stringify({ band: BAND, columns: ['t', 'ax', 'ay', 'az', 'gx', 'gy', 'gz'], accelRange: 8, steps: raw, settings, at: new Date().toISOString() }),
-  }).then((r) => r.json()).then((r) => log(`recording saved: ${r.saved}`), (e) => log(`recording not saved: ${e.message}`));
+  }).then((r) => (r.status === 404 ? (rec.keep(name, data), { saved: 'in the browser (Download data)' }) : r.json())).then((r) => log(`recording saved: ${r.saved}`), (e) => log(`recording not saved: ${e.message}`));
 }
 function finishCalibration() {
   const raw = calib.raw;
