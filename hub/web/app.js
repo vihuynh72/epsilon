@@ -339,5 +339,11 @@
     };
   }
 
+  // Landing page: play the example once, and again on request. Nothing loops.
+  if ($("story-replay")) {
+    $("story-replay").onclick = () => { const st = $("story"); st.classList.remove("is-playing"); void st.offsetWidth; st.classList.add("is-playing"); };
+    $("story").classList.add("is-playing");
+  }
+
   loadState(true).then(connect);
 })();

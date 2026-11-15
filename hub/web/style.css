@@ -315,3 +315,19 @@ a { color: inherit; }
 @media (min-width: 40rem) {
   .built-list li { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: var(--space-md); }
 }
+
+/* Landing page: one message, start to finish. Plays once; "Play it again" restarts it. Never loops. */
+.story-wrap { display: grid; gap: var(--space-md); justify-items: start; padding-block: var(--space-2xl); }
+.story { display: grid; gap: var(--space-sm); justify-items: start; width: 100%; max-width: 34rem; padding: var(--space-lg); background: var(--color-paper-2); border-radius: var(--radius-card); }
+.story-step { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm); align-items: baseline; font-size: var(--text-sm); color: var(--color-ink-2); margin-top: var(--space-sm); }
+.story-dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-pill); background: var(--color-accent); }
+.story-bubble { background: var(--color-paper); }
+.story-bubble.story-urgent { background: var(--color-accent); color: var(--color-on-accent); }
+.story-meta { font-size: var(--text-xs); color: var(--color-ink-2); padding-inline: var(--space-sm); }
+.story.is-playing > * { opacity: 0; animation: story-in 520ms var(--ease-out) forwards; }
+.story.is-playing .s1 { animation-delay: 0.3s; } .story.is-playing .s2 { animation-delay: 1.3s; }
+.story.is-playing .s3 { animation-delay: 2.3s; } .story.is-playing .s4 { animation-delay: 2.9s; }
+.story.is-playing .s5 { animation-delay: 4.1s; } .story.is-playing .s6 { animation-delay: 5.1s; }
+.story.is-playing .s7 { animation-delay: 5.7s; } .story.is-playing .s8 { animation-delay: 6.9s; }
+@keyframes story-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .story.is-playing > * { opacity: 1; animation: none; } }
