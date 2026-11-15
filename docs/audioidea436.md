@@ -44,6 +44,25 @@ The app after that point does not change. A sound and a gesture both arrive as o
 - Sounds made while stimming or upset are not requests. Never treat them as messages, and never log or flag them.
 - Always-on listening is surveillance. Listening should start with a deliberate action by the wearer, such as a tap.
 
+## What research says (checked 2026-11-14)
+
+Zach's longer note on hardware limits and a demo plan is in [audiouidea436.md](audiouidea436.md). This section adds what others have already found.
+
+- **This has been studied.** MIT's Commalla project trains a personal model for each person from labels a caregiver gives. One paper reports it got the right class about 53% to 79% of the time for three people, across 5 kinds of sound. It works for some people much better than others. ([paper](https://www.media.mit.edu/publications/personalized-modeling-of-real-world-vocalizations-from-nonverbal-individuals/))
+- **The data exists.** ReCANVo holds 7,077 labelled sounds from 8 minimally speaking people. Its authors write that "any interpretation of a vocalization remains, at best, an interpretation." ([paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC10404278/))
+- **Speech tools do not cover this.** Google's Project Euphonia and Voiceitt help people whose words are unclear. They are not built for sounds that are not words. Voiceitt asks for at least 50 recordings. ([Voiceitt FAQ](https://www.voiceitt.com/faq))
+- **Speech-to-text invents words.** In one test a transcriber produced text for almost every clip that had no speech in it. Deepgram only documents keeping "uh" and "um". So never pass a sound to a transcriber and trust the text. ([test](https://arxiv.org/html/2505.12969v1), [Deepgram](https://developers.deepgram.com/docs/filler-words))
+- **Three examples is a guess.** Matching against a few saved examples is a reasonable first try, but no study we found says how many are enough.
+
+### How to do it without harming the wearer
+
+- Say "this may mean water", never "they said water". The label came from a carer. It is an interpretation.
+- The parent confirms or corrects every match. A correction becomes a new example.
+- Listening starts with the wearer's own action, such as a tap. Never always-on.
+- Keep the audio on the family's device. Do not store raw recordings elsewhere.
+- The wearer can refuse, and "stop" deletes their examples.
+- Do not guess emotion. Do not infer meaning for a sound nobody taught. Never use it for discipline or monitoring.
+
 ## Smallest test
 
 Three meanings, three examples each, one wearer, a quiet room. Count correct matches out of 20 per meaning, and false matches in five minutes of ordinary sound. If that works, add noise, then add a second person.
