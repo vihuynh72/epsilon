@@ -13,13 +13,19 @@ WEB = Path(__file__).resolve().parent / "web"
 IMESSAGE = Path(__file__).resolve().parent.parent / "imessage"
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
-         ".png": "image/png", ".woff2": "font/woff2", ".mp3": "audio/mpeg"}
+         ".png": "image/png", ".woff2": "font/woff2", ".mp3": "audio/mpeg",
+         ".json": "application/json", ".mjs": "text/javascript; charset=utf-8"}
 # one word list for the band page (hub/server.py) and this app, so the two cannot drift apart
 WORDS = json.loads((Path(__file__).resolve().parent / "messages.json").read_text(encoding="utf-8"))
 URGENT = [w["id"] for w in WORDS if w.get("urgent")]
 DEFAULT_CONFIG = {"child": "", "contact": "", "phrases": {w["id"]: w["phrase"] for w in WORDS}, "urgent": URGENT}
 LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 PAGES = {"/": "index.html", "/app": "app.html", "/sounds": "sounds.html", "/setup": "setup.html"}
+ROOT = Path(__file__).resolve().parent.parent
+# The band page (hub/sources/band) and the kit files it imports, served as they are so the whole
+# product is one web address. Nothing else in the repo is reachable.
+BAND_DIRS = ("hub/sources/band", "vexo-open-kit/js/src", "vexo-open-kit/projects/shared",
+             "vexo-open-kit/projects/gesture-trainer")
 KEEPALIVE = 15
 
 
@@ -123,6 +129,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if urlsplit(self.path).path == "/gesture":  # the hosted band page, on another address, may send words here
+            self.send_header("Access-Control-Allow-Origin", "*")
+        token = self.server.token
+        if token and parse_qs(urlsplit(self.path).query).get("k") == [token]:  # remember the key for this browser
+            self.send_header("Set-Cookie", "ek=%s; Path=/; SameSite=Lax; HttpOnly; Max-Age=86400" % token)
         self.end_headers()
         self.wfile.write(body)
 
@@ -144,19 +155,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route("POST")
 
+    def do_OPTIONS(self):  # a browser on another address asks first whether it may send a word
+        if urlsplit(self.path).path != "/gesture":
+            return self.reply(404, {"ok": False, "error": "Not found."})
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Epsilon-Token")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def has_key(self):
         # the band server's --forward and the pages cannot set headers, so the token may also come as ?k=
-        given = self.headers.get("X-Epsilon-Token") or parse_qs(urlsplit(self.path).query).get("k", [""])[0]
+        # ... or as a cookie, set when a page was opened with ?k=, so the band page's own requests carry it
+        given = (self.headers.get("X-Epsilon-Token") or parse_qs(urlsplit(self.path).query).get("k", [""])[0]
+                 or next((c.split("=", 1)[1] for c in self.headers.get("Cookie", "").split("; ") if c.startswith("ek=")), ""))
         return bool(self.server.token) and hmac.compare_digest(given.encode(), self.server.token.encode())
 
     def route(self, method):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health", "/api/insight") and s.token and not (
+            if path in ("/events", "/api/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health", "/api/insight") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
-            if method == "GET" and path == "/events":
+            if method == "GET" and path in ("/events", "/api/events"):  # /api/events: the band page listens here
                 return self.stream()
             if method == "GET" and path == "/api/state":
                 with s.lock:
@@ -165,6 +189,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, {"config": s.config, "urgent": urgent, "events": s.events[-100:][::-1]})
             if method == "GET" and path in PAGES:
                 return self.static(PAGES[path])
+            if method == "GET" and path == "/band":  # the band page: connect, teach, recognise
+                self.send_response(302)
+                self.send_header("Location", "/hub/sources/band/")
+                token = s.token
+                if token and parse_qs(urlsplit(self.path).query).get("k") == [token]:
+                    self.send_header("Set-Cookie", "ek=%s; Path=/; SameSite=Lax; HttpOnly; Max-Age=86400" % token)
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
+            if method == "GET" and any(path.startswith("/" + d + "/") for d in BAND_DIRS):
+                return self.band_file(path)
+            if method == "GET" and path == "/api/info":  # what the band page asks its server on start
+                return self.reply(200, {"feed_url": "", "forward_to": ["Epsilon Messages"], "messages": WORDS, "replies": {}})
+            if method == "POST" and path == "/api/message":
+                return self.message()
             if path == "/api/sound-log":
                 return self.sound_log(method)
             if path == "/api/health":
@@ -194,11 +232,36 @@ class Handler(BaseHTTPRequestHandler):
             raise Bad(404, "Not found.")
         self.reply(200, f.read_bytes(), ctype)
 
-    def gesture(self):
-        s, raw = self.server, self.read_body(4096)
-        if s.token and not (self.has_key() or (s.trust_local and self.client_address[0] in LOOPBACK)):
+    def band_file(self, path):
+        rel = unquote(path).lstrip("/")
+        f = (ROOT / (rel + "index.html" if rel.endswith("/") else rel)).resolve()
+        inside = any(f.is_relative_to((ROOT / d).resolve()) for d in BAND_DIRS)  # ".." cannot climb out
+        if not inside or f.suffix not in TYPES or not f.is_file():
+            raise Bad(404, "Not found.")
+        self.reply(200, f.read_bytes(), TYPES[f.suffix])
+
+    def may_send(self):
+        s = self.server
+        origin = self.headers.get("Origin", "")
+        own_page = not origin or urlsplit(origin).netloc == self.headers.get("Host", "")
+        if s.token and not (self.has_key() or (s.trust_local and own_page and self.client_address[0] in LOOPBACK)):
             raise Bad(401, "Missing or wrong token (X-Epsilon-Token header, or ?k= in the address).")
-        b = parse_obj(raw)
+
+    def message(self):
+        """What the band page posts for each recognised word: {"id", "via", "confidence", "forward"}."""
+        b = parse_obj(self.read_body(4096))
+        self.may_send()
+        if b.get("forward") is not True:  # "Send to the guardian app" is off: the page is teaching or testing
+            return self.reply(200, {"ok": True, "forwarded": []})
+        self.gesture({"id": b.get("id"), "via": b.get("via"), "confidence": b.get("confidence")},
+                     {"forwarded": [{"ok": True, "to": "Epsilon Messages", "status": 200}]})
+
+    def gesture(self, b=None, extra=None):
+        s = self.server
+        if b is None:
+            raw = self.read_body(4096)
+            self.may_send()
+            b = parse_obj(raw)
         # the band server forwards {"id": ..., "time": <milliseconds>}; plain clients send {"gesture": ...}
         g, c, t = b.get("gesture") or b.get("id"), b.get("confidence"), b.get("time")
         if num(t) and t > 1e11:
@@ -247,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
                     q.put_nowait(line)
                 except queue.Full:
                     pass  # a stuck dashboard drops events rather than slowing the hub
-        self.reply(200, {"ok": True, "event": event})
+        self.reply(200, dict({"ok": True, "event": event}, **(extra or {})))
 
     def health(self, method):
         """Which outside services this hub can use, and proof that the decision model answers. Never shows a key."""
