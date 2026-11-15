@@ -9,7 +9,8 @@
     GET  /api/messages?k=KEY   every word so far (JSON)
     GET  /api/events?k=KEY     live: server-sent events "history", "message", "ack"
     POST /api/ack?k=KEY        the guardian answers; the band's light glows green
-  Or push: `--forward URL` POSTs every word as JSON to the dashboard at URL.
+  Or push: `--forward URL` POSTs every word as JSON to the app at URL, but only while the
+  band page's "Send to the guardian app" switch is on.
   KEY is kept in data/guardian-token so it stays the same across restarts. Delete that
   file to make a new one (the old one stops working).
 
@@ -85,18 +86,30 @@ FEED = Feed()
 FORWARD = []                                            # URLs from --forward
 
 
+def host_of(url):
+    """Just the host, for showing on the page (the URL itself may hold the app's key)."""
+    return urlsplit(url).netloc
+
+
 def forward(data):
-    """POST one word to every --forward URL, in the background so the band page never waits."""
+    """POST one word to every --forward URL, all at once; wait at most 5 s. Returns what each said."""
+    results = {}
     def go(url):
         request = urllib.request.Request(url, data=json.dumps(data).encode(), method="POST",
                                          headers={"Content-Type": "application/json", "User-Agent": "epsilon-hub"})
         try:
             with urllib.request.urlopen(request, timeout=5) as answer:
-                print(f"          forwarded to {url}: {answer.status}", flush=True)
-        except Exception as e:                           # the dashboard is down or slow: say so, keep going
-            print(f"          NOT forwarded to {url}: {e}", flush=True)
-    for url in FORWARD:
-        threading.Thread(target=go, args=(url,), daemon=True).start()
+                results[url] = {"to": host_of(url), "ok": 200 <= answer.status < 300, "status": answer.status}
+        except Exception as e:                           # the app is down, slow or unreachable: say so, keep going
+            results[url] = {"to": host_of(url), "ok": False, "error": str(getattr(e, "reason", e))[:120]}
+        r = results[url]
+        print(f"          {'forwarded' if r['ok'] else 'NOT forwarded'} to {r['to']}: {r.get('status') or r.get('error')}", flush=True)
+    threads = [threading.Thread(target=go, args=(url,), daemon=True) for url in FORWARD]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(6)
+    return [results.get(url, {"to": host_of(url), "ok": False, "error": "no answer"}) for url in FORWARD]
 
 
 def load_token():
@@ -203,6 +216,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/info":
             return self.send_json(200, {
                 "feed_url": self.server.feed_url,
+                "forward_to": [host_of(url) for url in FORWARD],
                 "messages": list(MESSAGES.values()),
                 "replies": REPLIES,
             })
@@ -320,8 +334,12 @@ class Handler(BaseHTTPRequestHandler):
             sent = FEED.publish("message", word)
             note = f", confidence {word['confidence']:.2f}" if "confidence" in word else ""
             print(f"{time.strftime('%H:%M:%S')}  sent  {m['label']:<8} ({via}{note})", flush=True)
-            forward(sent)
-            return self.send_json(200, sent)
+            # Forward only when the page says so (its "Send to the guardian app" switch): while
+            # teaching and testing, words stay on this laptop.
+            sent_out = forward(sent) if body.get("forward") is True and FORWARD else []
+            if FORWARD and not sent_out:
+                print("          (not forwarded: the page's switch is off)", flush=True)
+            return self.send_json(200, {**sent, "forwarded": sent_out})
 
         if path == "/api/ack" and (self.local() or self.cors):
             reply = body.get("reply")

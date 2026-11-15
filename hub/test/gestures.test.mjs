@@ -313,3 +313,16 @@ test('relative: taught with the wrist one way, recognised with it turned another
     assert.equal(got.id, d, `${d} with the wrist turned -> ${got.id ?? got.reason}`);
   }
 });
+
+test('confidence: clear matches pass the guardian app (>= 0.8), doubtful ones do not', () => {
+  const { confidenceOf } = imports;
+  const words = Object.keys(DIRS);
+  const examples = Object.fromEntries(words.map((d) => [d, [moveShape(d), moveShape(d, { slow: 1.2 }), moveShape(d, { slow: 0.85 })]]));
+  for (const d of words) {
+    const got = classify(moveShape(d, { roll: 1, slow: 1.1 }), examples);
+    assert.ok(confidenceOf(got) >= 0.8, `${d}: ${confidenceOf(got).toFixed(2)} (score ${got.best.score.toFixed(2)})`);
+  }
+  assert.ok(confidenceOf({ id: 'x', best: { score: 0.95 }, next: { score: 3 } }) < 0.8, 'at the edge of the limit');
+  assert.ok(confidenceOf({ id: 'x', best: { score: 0.3 }, next: { score: 0.4 } }) < 0.8, 'runner-up close behind');
+  assert.equal(confidenceOf({ id: null }), 0);
+});

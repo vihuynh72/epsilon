@@ -525,6 +525,20 @@ export function classify(shape, examples, { tolerance = 1, wordLimits = limits(e
   return { id: best.id, best, next, ranked };
 }
 
+/**
+ * How sure a recognised movement is, 0..1, for the guardian's app (it holds back words below
+ * 0.8 as doubtful). Near an example and well clear of the runner-up = above 0.9; close to the
+ * word's limit (score 1) or to the runner-up = below 0.8. Taps are exact and get 1.
+ */
+export function confidenceOf(result) {
+  if (!result?.id) return 0;
+  const score = result.best.score;
+  const near = 1 - 0.5 * score * score;                               // 0.3 -> 0.96, 0.6 -> 0.82, 1 -> 0.5
+  const ratio = result.next ? result.next.score / Math.max(score, 1e-6) : Infinity;
+  const clear = Math.min(1, 0.75 + Math.max(0, ratio - MARGIN) * 0.36);   // runner-up just past the margin -> 0.75, 2x -> 1
+  return Math.max(0, Math.min(1, near * clear));
+}
+
 /** Leave-one-out: every example against all the others. { id: { right, total, wrong: [...] } } */
 export function check(examples, { tolerance = 1 } = {}) {
   const report = {};

@@ -10,7 +10,7 @@
 // The maths is in gestures.js; this file is only the page and the band.
 import { $, say, attempt, onConnect } from '../../../vexo-open-kit/projects/shared/page.js';
 import {
-  MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes,
+  MotionReader, TapDetector, TapSequencer, TAP_DEFAULTS, calibrate, toShape, classify, clashes, confidenceOf,
   cutWindow, isBusy, tapsOnly, parseExamples, MAX_EXAMPLES, GYRO_SCALE, LIN_SCALE,
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
@@ -36,6 +36,24 @@ const WORDS = info?.messages ?? [];
 const IDS = WORDS.map((w) => w.id);
 const word = (id) => WORDS.find((w) => w.id === id);
 $('#feed-url').textContent = info?.feed_url ?? '?';
+
+// --- "Send to the guardian app": off while teaching and testing, on when ready --------------------
+const APP_STORE = 'epsilon-to-app';
+const appHosts = info?.forward_to ?? [];
+function showAppSwitch() {
+  const on = $('#to-app').checked;
+  $('#to-app-row').classList.toggle('on', on);
+  $('#app-state').textContent = !appHosts.length ? '(start the server with --forward to use this)'
+    : on ? `on: words go to ${appHosts.join(', ')}` : 'off: words stay on this laptop';
+}
+$('#to-app').disabled = !appHosts.length;
+try { $('#to-app').checked = appHosts.length > 0 && localStorage.getItem(APP_STORE) === 'on'; } catch { /* private window */ }
+$('#to-app').onchange = () => {
+  try { localStorage.setItem(APP_STORE, $('#to-app').checked ? 'on' : 'off'); } catch { /* private window */ }
+  log(`send to the guardian app: ${$('#to-app').checked ? 'on' : 'off'}`);
+  showAppSwitch();
+};
+showAppSwitch();
 
 // --- what the page knows: movement examples, tap words, tap calibration ---------------------
 let taught, learned, tapWords, tapSettings;
@@ -429,8 +447,7 @@ function useGesture(shape) {
   const got = classify(shape, movements(), { tolerance: tolerance() });
   const near = got.ranked.slice(0, 3).map((r) => `${r.id} ${r.score.toFixed(2)}`).join(', ');
   log(`movement -> ${got.id ?? `not sure (${got.reason})`}   [${near}]`);
-  // confidence for the guardian's app: 1 = right on an example, 0 = at the edge of "not sure"
-  if (got.id) return propose(got.id, shape, 'gesture', Math.max(0, Math.min(1, 1 - got.best.score)));
+  if (got.id) return propose(got.id, shape, 'gesture', confidenceOf(got));   // the app holds back below 0.8
   if (got.reason === 'none') return;
   card({ icon: '🤔', title: 'Didn’t catch that', hint: 'Try again: pause, gesture, pause.', state: 'unsure', back: 2500 });
   light(null);
@@ -468,12 +485,17 @@ async function send(id, via, shape = null, confidence = null) {
     const r = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Epsilon': '1' },
-      body: JSON.stringify({ id, via, confidence }),
+      body: JSON.stringify({ id, via, confidence, forward: $('#to-app').checked }),
     });
     if (!r.ok) throw new Error(`server said ${r.status}`);
-    log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})`);
-    card({ icon: w.icon, title: `${w.label}: sent ✓`, hint: `“${w.phrase}”`, colour: w.colour, state: 'sent', back: 3000 });
-    light('#00ff00', { pattern: 'flash', period: 300 }, 1500);
+    const answer = await r.json().catch(() => ({}));
+    const out = answer.forwarded ?? [];
+    const failed = out.filter((f) => !f.ok);
+    log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})${out.map((f) => `  ${f.ok ? '→' : '✗'} ${f.to}${f.ok ? '' : ` (${f.error ?? f.status})`}`).join('')}`);
+    const where = !out.length ? 'Only on this laptop (the switch is off).'
+      : failed.length ? `The guardian app did not get it (${failed[0].error ?? failed[0].status}).` : 'Delivered to the guardian app.';
+    card({ icon: w.icon, title: `${w.label}: sent ✓`, hint: `“${w.phrase}” · ${where}`, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
+    light(failed.length ? '#ff9f0a' : '#00ff00', { pattern: 'flash', period: 300 }, 1500);
     recent(`${w.icon} ${w.label}`);
     if (shape && $('#learn').checked) keep(id, shape);
   } catch (e) {

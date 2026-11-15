@@ -77,3 +77,12 @@ pre { max-height: 220px; overflow: auto; font-size: 0.75rem; background: var(--c
 .phase.go { color: var(--accent); animation: pop 0.25s ease-out; }
 @keyframes pop { from { transform: scale(0.85); } to { transform: none; } }
 .tile small { font-size: 0.7rem; color: var(--soft); }
+
+/* The "Send to the guardian app" switch */
+.to-app { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); cursor: pointer; }
+.to-app input { appearance: none; width: 42px; height: 24px; border-radius: 12px; background: var(--line); position: relative; flex: none; cursor: pointer; transition: background 0.2s; margin: 0; }
+.to-app input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.to-app input:checked { background: var(--good); }
+.to-app input:checked::after { transform: translateX(18px); }
+.to-app input:disabled { opacity: 0.4; }
+.to-app.on { border-color: var(--good); }
