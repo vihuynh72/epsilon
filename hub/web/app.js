@@ -318,5 +318,25 @@
     };
   }
 
+  // Messages page: Gemini describes the last day in plain words
+  if ($("insight-btn")) {
+    $("insight-btn").onclick = async () => {
+      const b = $("insight-btn"), box = $("insight"), tip = $("insight-tip");
+      b.disabled = true;
+      box.hidden = false;
+      tip.hidden = true;
+      $("insight-by").textContent = "";
+      $("insight-summary").textContent = "Reading today's messages…";
+      const res = await post("/api/insight", {});
+      b.disabled = false;
+      if (res.error) { $("insight-summary").textContent = res.error; return; }
+      const d = res.data;
+      $("insight-summary").textContent = d.summary;
+      tip.textContent = "Suggestion: " + d.suggestion;
+      tip.hidden = !d.suggestion;
+      if (d.model) $("insight-by").textContent = "Written by Gemini 4 in " + (d.ms / 1000).toFixed(1) + " s";
+    };
+  }
+
   loadState(true).then(connect);
 })();

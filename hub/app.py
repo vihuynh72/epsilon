@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from hub.decide import decide, gemini_ask
+from hub.insight import summarise as summarise_day
 from hub.keys import get as get_key
 from hub.voice import speak
 
@@ -84,10 +85,11 @@ def clean_config(b):
     return out
 
 
-def make_server(host, port, data, token="", ask_model=None, speak=None, send=None, trust_local=False):
+def make_server(host, port, data, token="", ask_model=None, speak=None, send=None, trust_local=False, summarise=None):
     s = ThreadingHTTPServer((host, port), Handler)
     s.data, s.token, s.lock, s.listeners, s.events = Path(data), token, threading.Lock(), [], []
     s.ask_model, s.speak, s.send = ask_model, speak, send  # None in tests, so they never touch the network
+    s.summarise = summarise  # the day summary: also None in tests
     s.trust_local = trust_local  # the hub's own computer may send gestures without the key (off in tests)
     s.data.mkdir(parents=True, exist_ok=True)
     try:
@@ -151,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
         path, s = urlsplit(self.path).path, self.server
         try:
             # on a hosted hub the message list is private: reading it needs the key too
-            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health") and s.token and not (
+            if path in ("/events", "/api/state", "/api/sound-log", "/api/transcribe", "/api/health", "/api/insight") and s.token and not (
                     self.has_key() or self.client_address[0] in LOOPBACK):
                 raise Bad(401, "Open this page with its key: add ?k=... to the address.")
             if method == "GET" and path == "/events":
@@ -167,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.sound_log(method)
             if path == "/api/health":
                 return self.health(method)
+            if method == "POST" and path == "/api/insight":
+                return self.insight()
             if method == "POST" and path == "/api/transcribe":
                 return self.transcribe()
             if method == "GET" and path.startswith("/static/"):
@@ -263,6 +267,16 @@ class Handler(BaseHTTPRequestHandler):
                             "action": answer[0] if answer else None, "reason": answer[1] if answer else None}
         self.reply(200, out)
 
+    def insight(self):
+        """Gemini's plain summary of the last day of messages. Slow, so the model is called outside the lock."""
+        s = self.server
+        if not s.summarise:
+            return self.reply(200, {"ok": False, "error": "The summary is not switched on."})
+        with s.lock:
+            events, cfg = list(s.events), s.config
+        out = s.summarise(events, cfg)
+        self.reply(200, dict(out, ok=True) if out else {"ok": False, "error": "Gemini did not answer. Try again in a moment."})
+
     def sound_log(self, method):
         """Each sound the page tried: what it guessed and what a person said it was. This is how we see it improve."""
         s, log = self.server, self.server.data / "sounds.jsonl"
@@ -356,7 +370,8 @@ def main():
     host, port = os.environ.get("EPSILON_HOST", "127.0.0.1"), int(os.environ.get("EPSILON_PORT") or os.environ.get("PORT") or 8787)  # PORT: set by Railway
     data = os.environ.get("EPSILON_DATA") or Path(__file__).resolve().parent.parent / "data"
     srv = make_server(host, port, data, os.environ.get("EPSILON_TOKEN", ""), gemini_ask, speak,
-                      imessage if os.environ.get("EPSILON_IMESSAGE") == "1" else None, trust_local=True)
+                      imessage if os.environ.get("EPSILON_IMESSAGE") == "1" else None, trust_local=True,
+                      summarise=summarise_day)
     print("Epsilon hub listening on http://%s:%d" % srv.server_address[:2], flush=True)
     try:
         srv.serve_forever()

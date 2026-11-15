@@ -27,12 +27,14 @@ function el(tag, cls, text) {
 const label = (m) => m.charAt(0).toUpperCase() + m.slice(1);
 
 /** Record once: loudness frames for the matcher, and the audio itself only if Deepgram is switched on. */
-async function record(wantAudio) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  let ctx;
+async function record(wantAudio, onStart) {
+  // made during the button press, before any waiting: a browser may refuse to start audio later
+  const ctx = new AudioContext();
+  ctx.resume();
+  let stream;
   try {
-  ctx = new AudioContext();
-  await ctx.resume();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // the browser may ask the person here
+  onStart();
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0;
@@ -60,17 +62,17 @@ async function record(wantAudio) {
   await stopped;
   return { frames, audio: recorder ? new Blob(chunks, { type: recorder.mimeType }) : null };
   } finally {
-    stream.getTracks().forEach((t) => t.stop()); // the microphone is off again, whatever happened
-    if (ctx) ctx.close();
+    if (stream) stream.getTracks().forEach((t) => t.stop()); // the microphone is off again, whatever happened
+    ctx.close();
   }
 }
 
 async function capture(statusEl, wantAudio) {
   if (busy) return null;
   busy = true;
-  statusEl.textContent = "Listening…";
+  statusEl.textContent = "Waiting for the microphone. If the browser asks, press Allow.";
   try {
-    const got = await record(wantAudio);
+    const got = await record(wantAudio, () => { statusEl.textContent = "Listening… make the sound now."; });
     const print = fingerprint(got.frames);
     statusEl.textContent = print ? "" : "No sound heard. Try again, a little closer.";
     return print ? { print, audio: got.audio } : null;

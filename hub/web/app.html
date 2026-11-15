@@ -25,6 +25,15 @@
       <p class="status" id="live-status" data-live="false" role="status"><span class="dot" aria-hidden="true"></span><span id="live-label">Connecting…</span></p>
     </header>
 
+    <section class="insight-box" aria-label="Today">
+      <button class="btn" type="button" id="insight-btn">What does today look like?</button>
+      <div class="insight" id="insight" hidden aria-live="polite">
+        <p id="insight-summary"></p>
+        <p id="insight-tip"></p>
+        <p class="quiet insight-by" id="insight-by"></p>
+      </div>
+    </section>
+
     <div class="empty" id="feed-empty">
       <p class="msg-text">No messages yet.</p>
       <p class="quiet">When your child sends a word, it appears here. You can try one from <a href="/setup">Set up</a>.</p>
