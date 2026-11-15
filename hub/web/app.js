@@ -8,7 +8,7 @@
   // A hosted hub is opened as /app?k=KEY. Carry the key on every call and on links between our pages.
   const K = new URLSearchParams(location.search).get("k");
   const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
-  if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
+  if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"], a[href="/setup"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
   // never show a whole phone number on screen: these pages get shared and filmed
   const who = (to) => (/^[+\d][\d ()-]{6,}$/.test(to) ? "the number ending " + to.replace(/\D/g, "").slice(-2) : to);
@@ -27,34 +27,44 @@
     return d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + time;
   }
 
+  const cap1 = (g) => g.charAt(0).toUpperCase() + g.slice(1);
+
+  /** The small line under a bubble: the time and, when it matters, what happened. [text, isProblem] */
   function statusOf(e) {
-    if (e.action === "held") return ["Held back" + (e.reason ? ": " + e.reason : ""), false];
-    // when the decision model chose, show its own one-line reason: this is the decision log
-    const why = e.by === "model" && e.reason ? " · Why: " + e.reason : "";
-    if (e.action === "call") return ["Urgent voice message" + why, false];
-    if (e.delivery === "sent") return [(e.to ? "Texted to " + who(e.to) : "Texted") + why, false];
-    if (e.delivery === "failed") return ["Could not send" + why, true];
-    return ["Recorded here" + why, false];
+    if (e.action === "call") return [when(e.time) + " · Emergency, sent with a voice message", false];
+    if (e.delivery === "sent") return [when(e.time) + " · Delivered", false];
+    if (e.delivery === "failed") return [when(e.time) + " · Not delivered", true];
+    return [when(e.time), false];
   }
 
+  /** Everything else about a message, shown only when the small line is opened. */
+  function detailOf(e) {
+    const how = { gesture: "by gesture", taps: "by taps", sound: "by sound", button: "by a test button" }[e.via];
+    const parts = [cap1(e.gesture) + (how ? " " + how : "")];
+    if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "% match");
+    if (e.delivery === "sent" && e.to) parts.push("texted to " + who(e.to));
+    if (e.reason) parts.push(e.reason);
+    return parts.join(" · ");
+  }
+
+  // One message. A sent message is a bubble holding only the sentence. A held one is a quiet note, not a bubble.
   function row(e) {
-    const li = el("li", "msg" + (e.action === "call" ? " is-urgent" : ""));
+    const held = e.action === "held";
+    const li = el("li", "chat" + (e.action === "call" ? " is-urgent" : "") + (held ? " is-held" : ""));
     li.dataset.id = e.id;
-    li.append(el("p", "msg-text", e.text));
-    const meta = el("p", "msg-meta");
-    const how = { gesture: "by gesture", taps: "by taps", sound: "by sound", button: "by button" }[e.via];
-    const parts = [when(e.time), how ? e.gesture + " " + how : e.gesture];
-    if (typeof e.confidence === "number") parts.push(Math.round(e.confidence * 100) + "%");
-    const [label, bad] = statusOf(e);
-    meta.append(parts.join(" · ") + " · ", el("span", bad ? "warn" : "", label));
-    li.append(meta);
-    if (typeof e.audio === "string" && e.audio.startsWith("/audio/")) {
+    if (!held) li.append(el("p", "bubble", e.text));
+    if (!held && typeof e.audio === "string" && e.audio.startsWith("/audio/")) {
       const a = el("audio");
       a.controls = true;
       a.preload = "none";
       a.src = e.audio;
+      a.setAttribute("aria-label", "Voice message");
       li.append(a);
     }
+    const [label, bad] = held ? ["Held back: " + cap1(e.gesture) + " · " + when(e.time), false] : statusOf(e);
+    const more = el("details", "chat-more");
+    more.append(el("summary", bad ? "warn" : "", label), el("p", null, detailOf(e)));
+    li.append(more);
     return li;
   }
 
@@ -74,8 +84,10 @@
 
   function renderAll() {
     if (feed) {
-      feed.replaceChildren(...events.map(row));
+      feed.replaceChildren(...events.slice().reverse().map(row)); // a chat reads downwards: newest last
       $("feed-empty").hidden = events.length > 0;
+      feed.hidden = events.length === 0;
+      requestAnimationFrame(() => { feed.scrollTop = feed.scrollHeight; }); // after layout, or the height is stale
     }
     showLatest(false);
   }
@@ -97,9 +109,11 @@
     if (feed && events[0] === e) {
       const n = row(e);
       n.classList.add("is-new");
-      feed.prepend(n); // prepend, not re-render, so a playing message keeps playing
-      while (feed.children.length > events.length) feed.lastElementChild.remove();
+      feed.append(n); // append, not re-render, so a playing message keeps playing
+      while (feed.children.length > events.length) feed.firstElementChild.remove();
       $("feed-empty").hidden = true;
+      feed.hidden = false;
+      feed.scrollTop = feed.scrollHeight;
     } else if (feed) {
       renderAll();
     }
@@ -114,7 +128,7 @@
       (s.events || []).forEach((e) => seen.set(e.id, e));
       events = [...seen.values()].sort((a, b) => b.id - a.id).slice(0, 100);
       renderAll();
-      if (first && s.config) showConfig(s.config);
+      if (first && s.config) showConfig(Object.assign({ urgent: s.urgent || [] }, s.config));
     } catch (err) {
       /* the stream will retry; the page keeps what it has */
     }
@@ -156,54 +170,48 @@
     }
   }
 
-  // Settings
-  function field(label, value, cls) {
-    const l = el("label", "field", label);
-    const i = el("input", cls);
-    i.value = value;
-    i.autocomplete = "off";
-    l.append(i);
-    return l;
-  }
+  // Set up: one row per word, holding everything about it: the sentence the parent receives,
+  // whether it is an emergency, and a button to try it.
+  const cap = cap1;
 
-  function addRow(g, p) {
-    const r = el("div", "phrase-row");
-    r.append(field("Gesture", g, "p-gesture"), field("Sentence", p, "p-sentence"));
-    $("phrase-rows").append(r);
-    return r;
+  function addWord(g, sentence, urgent) {
+    const li = el("li", "word");
+    li.dataset.word = g;
+    const box = el("input", "w-urgent");
+    box.type = "checkbox";
+    box.checked = urgent;
+    const lab = el("label", "check");
+    lab.append(box, el("span", null, "Emergency"));
+    const head = el("div", "word-head");
+    head.append(el("span", "word-name", cap(g)), lab);
+    const input = el("input", "w-sentence");
+    input.value = sentence;
+    input.autocomplete = "off";
+    input.placeholder = "The sentence you receive";
+    input.setAttribute("aria-label", "Sentence you receive for " + g);
+    const tryBtn = el("button", "btn", "Try it");
+    tryBtn.type = "button";
+    tryBtn.setAttribute("aria-label", "Try " + g);
+    tryBtn.onclick = () => tryWord(tryBtn, g);
+    const rm = el("button", "btn-quiet", "Remove");
+    rm.type = "button";
+    rm.setAttribute("aria-label", "Remove " + g);
+    rm.onclick = () => li.remove();
+    const foot = el("div", "word-foot");
+    foot.append(tryBtn, rm);
+    li.append(head, input, foot);
+    $("words").append(li);
+    return li;
   }
 
   function showConfig(c) {
     config = c;
-    if (form) {
-      $("cfg-child").value = c.child || "";
-      $("cfg-contact").value = c.contact || "";
-      $("phrase-rows").replaceChildren();
-      Object.entries(c.phrases || {}).forEach(([g, p]) => addRow(g, p));
-      $("urgent-rows").replaceChildren();
-      Object.keys(c.phrases || {}).forEach((g) => {
-        const box = el("input");
-        box.type = "checkbox";
-        box.value = g;
-        box.checked = (c.urgent || []).includes(g);
-        const lab = el("label", "check");
-        lab.append(box, el("span", null, g.charAt(0).toUpperCase() + g.slice(1)));
-        $("urgent-rows").append(lab);
-      });
-    }
-    showTests();
-  }
-
-  function showTests() {
-    const box = $("tests");
-    if (!box) return;
-    const names = Object.keys((config && config.phrases) || {});
-    box.replaceChildren(...names.map((g) => {
-      const b = el("button", "btn", g);
-      b.type = "button";
-      b.onclick = () => sendTest(b, g, 0.95);
-      return b;
-    }));
+    if (!form) return;
+    $("cfg-child").value = c.child || "";
+    $("cfg-contact").value = c.contact || "";
+    $("words").replaceChildren();
+    const names = Object.keys(c.phrases || {});
+    names.forEach((g) => addWord(g, c.phrases[g], (c.urgent || []).includes(g)));
     const d = $("test-doubtful");
     d.disabled = names.length === 0;
     d.onclick = () => sendTest(d, names[0], 0.4);
@@ -212,46 +220,68 @@
   async function sendTest(btn, gesture, confidence) {
     btn.disabled = true;
     $("test-error").textContent = "";
-    const res = await post("/gesture", { gesture, confidence });
+    const res = await post("/gesture", { gesture, confidence, via: "button" });
     btn.disabled = false;
-    if (res.error) $("test-error").textContent = res.error;
-    else upsert(res.data.event); // shows it even if the stream is down; dedupe by id
+    if (res.error) { $("test-error").textContent = res.error; return; }
+    const e = res.data.event;
+    upsert(e); // on the Messages page this shows it even if the stream is down; dedupe by id
+    if ($("try-status")) {
+      $("try-status").textContent = e.action === "held" ? "Held back: " + (e.reason || "nothing was sent.")
+        : (e.action === "call" ? "Sent as an emergency." : "Sent.") + " Open Messages to see it.";
+    }
+  }
+
+  let saveTimer;
+  /** Save everything in Set up. True when the hub accepted it. */
+  async function saveConfig() {
+    const save = $("save"), err = $("save-error");
+    const phrases = {}, urgent = [];
+    form.querySelectorAll(".word").forEach((li) => {
+      phrases[li.dataset.word] = li.querySelector(".w-sentence").value.trim();
+      if (li.querySelector(".w-urgent").checked) urgent.push(li.dataset.word);
+    });
+    clearTimeout(saveTimer);
+    save.disabled = true;
+    save.dataset.state = "loading";
+    save.textContent = "Saving…";
+    err.textContent = "";
+    const res = await post("/api/config", {
+      child: $("cfg-child").value.trim(), contact: $("cfg-contact").value.trim(), phrases, urgent,
+    });
+    save.disabled = false;
+    if (res.error) {
+      save.dataset.state = "error";
+      save.textContent = "Save";
+      err.textContent = res.error;
+      return false;
+    }
+    showConfig(res.data);
+    save.dataset.state = "saved";
+    save.textContent = "Saved";
+    saveTimer = setTimeout(() => { save.textContent = "Save"; delete save.dataset.state; }, 2000);
+    return true;
+  }
+
+  /** Try a word exactly as it is on screen: save first, then act as if the band sent it. */
+  async function tryWord(btn, g) {
+    btn.disabled = true;
+    if (await saveConfig()) await sendTest(btn, g, 0.95);
+    btn.disabled = false;
   }
 
   if (form) {
-    const save = $("save"), err = $("save-error");
-    let timer;
-    $("add-row").onclick = () => addRow("", "").querySelector("input").focus();
-    form.onsubmit = async (ev) => {
-      ev.preventDefault();
-      const phrases = {};
-      form.querySelectorAll(".phrase-row").forEach((r) => {
-        const g = r.querySelector(".p-gesture").value.trim();
-        if (g) phrases[g] = r.querySelector(".p-sentence").value.trim();
-      });
-      clearTimeout(timer);
-      save.disabled = true;
-      save.dataset.state = "loading";
-      save.textContent = "Saving…";
-      err.textContent = "";
-      const res = await post("/api/config", {
-        child: $("cfg-child").value.trim(),
-        contact: $("cfg-contact").value.trim(),
-        phrases,
-        urgent: [...$("urgent-rows").querySelectorAll("input:checked")].map((b) => b.value).filter((g) => g in phrases),
-      });
-      save.disabled = false;
-      if (res.error) {
-        save.dataset.state = "error";
-        save.textContent = "Save";
-        err.textContent = res.error;
-        return;
-      }
-      showConfig(res.data);
-      save.dataset.state = "saved";
-      save.textContent = "Saved";
-      timer = setTimeout(() => { save.textContent = "Save"; delete save.dataset.state; }, 2000);
+    form.onsubmit = (ev) => { ev.preventDefault(); saveConfig(); };
+    const add = () => {
+      const box = $("new-word"), name = box.value.trim().toLowerCase();
+      const taken = [...form.querySelectorAll(".word")].some((li) => li.dataset.word === name);
+      $("save-error").textContent = !name || name.length > 40 ? "Type a word of 1 to 40 letters first."
+        : taken ? "That word is already in the list." : "";
+      if (!name || name.length > 40 || taken) return box.focus();
+      box.value = "";
+      addWord(name, "", false).querySelector(".w-sentence").focus();
     };
+    $("add-row").onclick = add;
+    $("new-word").onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); add(); } };
   }
 
   loadState(true).then(connect);

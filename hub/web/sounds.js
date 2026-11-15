@@ -5,7 +5,7 @@ import { BANDS, fingerprint, match } from "/static/sound-match.js";
 const $ = (id) => document.getElementById(id);
 const K = new URLSearchParams(location.search).get("k");
 const withKey = (url) => (K ? url + "?k=" + encodeURIComponent(K) : url);
-if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
+if (K) document.querySelectorAll('a[href="/"], a[href="/app"], a[href="/sounds"], a[href="/setup"]').forEach((a) => { a.href = withKey(a.getAttribute("href")); });
 
 const SECONDS = 2.5, FRAME_MS = 40, KEEP = 12; // keep the newest 12 examples per meaning
 const STORE = "epsilon.sounds", HEARD = "epsilon.heard";

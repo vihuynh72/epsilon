@@ -18,7 +18,7 @@ WORDS = json.loads((Path(__file__).resolve().parent / "messages.json").read_text
 URGENT = [w["id"] for w in WORDS if w.get("urgent")]
 DEFAULT_CONFIG = {"child": "", "contact": "", "phrases": {w["id"]: w["phrase"] for w in WORDS}, "urgent": URGENT}
 LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
-PAGES = {"/": "index.html", "/app": "app.html", "/sounds": "sounds.html"}
+PAGES = {"/": "index.html", "/app": "app.html", "/sounds": "sounds.html", "/setup": "setup.html"}
 KEEPALIVE = 15
 
 
@@ -158,7 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.stream()
             if method == "GET" and path == "/api/state":
                 with s.lock:
-                    return self.reply(200, {"config": s.config, "events": s.events[-100:][::-1]})
+                    # "urgent" is the emergency list in force: settings saved before it existed use the default
+                    urgent = s.config.get("urgent", [u for u in URGENT if u in s.config["phrases"]])
+                    return self.reply(200, {"config": s.config, "urgent": urgent, "events": s.events[-100:][::-1]})
             if method == "GET" and path in PAGES:
                 return self.static(PAGES[path])
             if path == "/api/sound-log":
