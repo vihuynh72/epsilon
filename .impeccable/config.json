@@ -29,6 +29,15 @@
         ],
         "createdAt": "2026-11-15T00:47:32.894Z",
         "reason": "agent checked in Chrome: same clamp() size tokens as app.html (h1 104px, h2 40px, body 16px), which the static scan does not resolve"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "hub/web/setup.html"
+        ],
+        "createdAt": "2026-11-15T01:08:35.170Z",
+        "reason": "agent saw the rendered page in Chrome: large serif h1 over 40px h2 over 16px body, from clamp() size tokens the static scan does not resolve"
       }
     ]
   }
