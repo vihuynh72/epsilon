@@ -193,3 +193,13 @@ a { color: inherit; }
 .more summary { cursor: pointer; font-weight: 500; padding-block: var(--space-sm); }
 .more summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .more[open] summary { margin-bottom: var(--space-sm); }
+
+/* Sounds page */
+.lede { max-width: 40rem; font-size: var(--text-lg); margin-bottom: var(--space-xl); }
+.sound-rows { display: grid; }
+.sound-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-xs) var(--space-md); padding-block: var(--space-sm); border-top: var(--rule-hair) solid var(--color-rule); }
+.sound-row .form-msg { grid-column: 1 / -1; }
+.sound-name { font-weight: 500; }
+.result { display: grid; gap: var(--space-sm); padding: var(--space-md); background: var(--color-paper); border-radius: var(--radius-input); }
+.check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm); align-items: start; font-size: var(--text-sm); color: var(--color-ink-2); }
+.check input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }

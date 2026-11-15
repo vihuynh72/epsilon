@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sounds · Epsilon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/sounds.js"></script>
+</head>
+<body>
+  <nav class="nav" aria-label="Main">
+    <a class="wordmark" href="/">Epsilon</a>
+    <a href="/app">Messages</a>
+    <a href="/sounds" aria-current="page">Sounds</a>
+  </nav>
+
+  <main class="page">
+    <header class="app-head">
+      <h1>Sounds</h1>
+    </header>
+    <p class="lede">Some people have their own sound for a thing. Teach Epsilon a few examples, then let it listen. It only ever says what a sound <strong>may</strong> mean, and you decide.</p>
+
+    <div class="app-grid">
+      <section class="panel" aria-labelledby="try-title">
+        <h2 id="try-title">Listen</h2>
+        <p class="quiet">Press the button, then make the sound. Epsilon listens for two and a half seconds and stops. It never listens on its own.</p>
+        <div class="actions">
+          <button class="btn btn-primary" type="button" id="listen">Listen now</button>
+          <p class="form-msg" id="listen-status" role="status"></p>
+        </div>
+
+        <div class="result" id="result" hidden>
+          <p class="msg-text" id="result-text"></p>
+          <p class="quiet" id="result-detail"></p>
+          <p class="quiet" id="result-heard"></p>
+          <div class="actions" id="result-actions"></div>
+        </div>
+
+        <p class="quiet" id="stats" role="status"></p>
+
+        <label class="check">
+          <input type="checkbox" id="use-deepgram">
+          <span>Also ask Deepgram what it hears. This sends each recording to Deepgram, a company.</span>
+        </label>
+      </section>
+
+      <section class="panel" aria-labelledby="teach-title">
+        <h2 id="teach-title">Teach</h2>
+        <p class="quiet">Record the sound for each meaning about three times. Only a fingerprint of the sound is kept, on this device. The recording itself is not saved.</p>
+        <div class="sound-rows" id="teach-rows"></div>
+        <div class="actions">
+          <button class="btn" type="button" id="forget">Delete all taught sounds</button>
+          <p class="form-msg warn" id="teach-error" role="alert"></p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
