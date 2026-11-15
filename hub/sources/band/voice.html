@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Band voice · Epsilon</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="voice.js"></script>
+</head>
+<body>
+  <nav class="nav" aria-label="Main">
+    <a class="wordmark" href="/">Epsilon</a>
+    <a href="/app">Messages</a>
+    <a href="/sounds">Sounds</a>
+    <a href="/setup">Set up</a>
+  </nav>
+  <main class="page page-narrow">
+    <header class="app-head"><h1>Band voice</h1></header>
+    <p class="lede">Speak to the band. Epsilon listens through the band’s own microphone for five seconds and works out what was said.</p>
+
+    <section class="panel" aria-labelledby="c-title">
+      <h2 id="c-title">1. Connect the band</h2>
+      <label class="field">Band number<input id="number" inputmode="numeric" autocomplete="off"></label>
+      <label class="field">How it is connected
+        <select id="link" class="w-sentence"><option value="ble">Bluetooth (double-tap the band first)</option><option value="serial">USB cable</option><option value="sim">Pretend band (no hardware, hears silence)</option></select>
+      </label>
+      <div class="actions">
+        <button class="btn btn-primary" type="button" id="connect">Connect</button>
+        <p class="form-msg" id="state" role="status">Not connected.</p>
+      </div>
+      <p class="quiet">If the band page is open on Bluetooth, choose the USB cable here. The band allows one program on each.</p>
+    </section>
+
+    <section class="panel note" aria-labelledby="l-title">
+      <h2 id="l-title">2. Listen</h2>
+      <p class="quiet">The band’s light turns blue while its microphone is on. The recording goes to Google and Deepgram to be understood.</p>
+      <div class="actions">
+        <button class="btn btn-primary" type="button" id="listen" disabled>Listen for 5 seconds</button>
+        <p class="form-msg" id="status" role="status"></p>
+      </div>
+      <div class="result" id="result" hidden>
+        <p class="msg-text" id="result-text"></p>
+        <p class="quiet" id="result-detail"></p>
+        <div class="actions" id="result-actions"></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
