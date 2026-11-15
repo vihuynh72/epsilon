@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "deploy": {
+    "startCommand": "EPSILON_HOST=0.0.0.0 python3 -m hub.app"
+  }
+}
