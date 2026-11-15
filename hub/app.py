@@ -200,7 +200,13 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and any(path.startswith("/" + d + "/") for d in BAND_DIRS):
                 return self.band_file(path)
             if method == "GET" and path == "/api/info":  # what the band page asks its server on start
-                return self.reply(200, {"feed_url": "", "forward_to": ["Epsilon Messages"], "messages": WORDS, "replies": {}})
+                # the family's own word list from Set up, so a word added there can be taught on the band page
+                with s.lock:
+                    cfg = s.config
+                known, urgent = {w["id"]: w for w in WORDS}, cfg.get("urgent", URGENT)
+                words = [dict(known.get(g, {"id": g, "label": g[:1].upper() + g[1:], "icon": "", "colour": "#34c759"}),
+                              phrase=p, urgent=g in urgent) for g, p in cfg["phrases"].items()]
+                return self.reply(200, {"feed_url": "", "forward_to": ["Epsilon Messages"], "messages": words, "replies": {}})
             if method == "POST" and path == "/api/message":
                 return self.message()
             if path == "/api/sound-log":

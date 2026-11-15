@@ -122,6 +122,12 @@ class Token(HubCase):
         quiet = self.call("POST", "/api/message", dict(word, forward=False), cookie)[1]
         self.assertEqual((quiet["forwarded"], "event" in quiet), ([], False))  # teaching: nothing is sent
 
+    def test_a_word_added_in_set_up_can_be_taught_on_the_band_page(self):
+        cfg = dict(server.DEFAULT_CONFIG, phrases=dict(server.DEFAULT_CONFIG["phrases"], hug="I want a hug."), urgent=["help"])
+        self.assertEqual(self.call("POST", "/api/config", cfg)[0], 200)
+        words = {w["id"]: w for w in self.call("GET", "/api/info")[1]["messages"]}
+        self.assertEqual((words["hug"]["label"], words["hug"]["phrase"], words["help"]["urgent"]), ("Hug", "I want a hug.", True))
+
     def test_band_server_forward_shape(self):
         # what hub/server.py --forward posts: the word's id, milliseconds, and the token only in the address
         sent = {"id": "help", "label": "Help", "phrase": "I need help!", "urgent": True, "via": "gesture",

@@ -27,7 +27,7 @@ function el(tag, cls, text) {
 const label = (m) => m.charAt(0).toUpperCase() + m.slice(1);
 
 /** Record once: loudness frames for the matcher, and the audio itself only if Deepgram is switched on. */
-async function record(wantAudio, onStart) {
+async function record(wantAudio, onStart, seconds) {
   // made during the button press, before any waiting: a browser may refuse to start audio later
   const ctx = new AudioContext();
   ctx.resume();
@@ -55,7 +55,7 @@ async function record(wantAudio, onStart) {
     }
     frames.push(frame);
   }, FRAME_MS);
-  await new Promise((done) => setTimeout(done, SECONDS * 1000));
+  await new Promise((done) => setTimeout(done, (seconds || SECONDS) * 1000));
   clearInterval(timer);
   const stopped = recorder ? new Promise((done) => { recorder.onstop = done; }) : null;
   if (recorder) recorder.stop();
@@ -176,6 +176,27 @@ async function settle(guess, meaning, attempt, send) {
   $("result-detail").textContent = !sent.ok ? (sent.error || "Could not send.")
     : e.action === "held" ? "Not sent. " + (e.reason || "It was held back.")
     : e.action === "call" ? "Sent as an urgent voice message." : "Sent to Messages.";
+  if (sent.ok && e.action === "call" && $("use-deepgram").checked) followUp();
+}
+
+/** After an emergency: keep listening a little longer and pass on whatever else is said. */
+async function followUp() {
+  if (busy) return;
+  busy = true;
+  const note = $("result-detail");
+  try {
+    note.textContent = "Emergency sent. Listening for 6 more seconds, to pass on anything else that is said…";
+    const got = await record(true, () => {}, 6);
+    const clip = await toWav(got.audio).catch(() => got.audio);
+    const said = ((await post("/api/transcribe", clip, true)).text || "").trim();
+    if (!said) { note.textContent = "Emergency sent. Nothing more was heard."; return; }
+    const more = await post("/gesture", { gesture: "spoken", text: "After the emergency: " + said, via: "voice" });
+    note.textContent = more.ok ? "Emergency sent. Also sent what was heard next: “" + said + "”" : "Emergency sent.";
+  } catch (err) {
+    note.textContent = "Emergency sent.";
+  } finally {
+    busy = false;
+  }
 }
 
 async function listen() {
