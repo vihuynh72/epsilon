@@ -10,7 +10,7 @@ Built in one day at VexoHacks (14 November 2026) by Vi, Arun, and Zach.
 
 ## You have a band. Now what?
 
-A parent needs one thing: a phone that gets iMessages. There is no app to install, and everything is one web address.
+A parent needs a phone that gets iMessages. Nothing to install: it is one web address.
 
 - [ ] **1. Open Epsilon and go to Set up.** Type your phone number. Press Save.
 - [ ] **2. Say hello once.** Send one iMessage to the Epsilon number, so it is allowed to text you.
@@ -44,14 +44,6 @@ Two rules are fixed in code: an emergency word is never held back, and neither i
 | Photon Spectrum | Delivers the texts and voice messages by iMessage |
 | Railway | Hosts the app |
 
-## The pages
-
-| Page | For |
-|---|---|
-| Messages | The conversation, as chat bubbles. Tap the line under a bubble for the reason. "What does today look like?" gives the summary |
-| Sounds | Teach a person's own sounds, or say a word your own way. It says what it *may* mean, and you confirm |
-| Set up | Phone number, words, emergencies, the band page, and a live check of each connection |
-
 <details>
 <summary><b>Run it yourself</b></summary>
 
@@ -63,7 +55,7 @@ python3 -m hub.app
 
 Open http://127.0.0.1:8787, go to **Set up**, and press **Try it** on a word. Then open **Messages**. The band page is at `/band`.
 
-Keys go in a local `.env` (names are in `.env.example`). All are optional: without them the app still runs and shows every message. Real texts also need Bun, `imessage/.env`, and `EPSILON_IMESSAGE=1`.
+Keys go in a local `.env` (names are in `.env.example`). All are optional.
 
 Tests: `python3 -m unittest hub.test_server hub.test_decide hub.test_insight` and `node --test hub/test/gestures.test.mjs hub/test_sound.test.mjs`
 </details>
@@ -79,10 +71,6 @@ Tests: `python3 -m unittest hub.test_server hub.test_decide hub.test_insight` an
 | A ringing phone call | Not working |
 | Tested with autistic users | No |
 
-## What we hold to
-
-- A false message puts words in someone's mouth. When unsure, Epsilon stays quiet.
-- Stimming is never flagged, counted, or commented on.
-- It adds to the tablet or cards a person already uses. It never replaces them.
+A false message puts words in someone's mouth, so when unsure, Epsilon stays quiet. Stimming is never flagged or counted. Epsilon adds to the tablet or cards a person already uses and never replaces them.
 
 More: [how the parts join](docs/PLAN.md) · [submission text](docs/DEVPOST.md) · [the sound idea and its research](docs/audioidea436.md)
