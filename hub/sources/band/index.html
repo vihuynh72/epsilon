@@ -15,10 +15,6 @@
     <span id="band-state" class="pill">Band 44 not connected</span>
   </header>
   <p id="message" class="status-line" role="status"></p>
-  <label class="to-app" id="to-app-row">
-    <input type="checkbox" id="to-app" role="switch">
-    <span><b>Send to the guardian app</b> <span id="app-state" class="soft small"></span></span>
-  </label>
 
   <!-- Used by the kit's connect helper (page.js). The link choice stays out of sight:
        USB cable by default, ?link=pretend in the address for the pretend band. -->
@@ -30,11 +26,13 @@
   </select>
   <p id="needs-server" class="note">Start the server first: <code>python3 hub/server.py</code>, then open <code>http://localhost:8000/</code>.</p>
 
+  <div class="layout">
+    <div class="primary">
   <!-- 1. Connect -->
   <section id="connect-view" class="view">
     <div class="hero" aria-hidden="true">⌚</div>
     <h2>Connect the band</h2>
-    <p class="soft">Plug in the band with its USB cable, then choose Vexo Open band</p>
+    <p class="soft">Plug in the band, then choose Vexo Open band</p>
     <button id="connect" class="primary">Connect band</button>
   </section>
 
@@ -73,15 +71,20 @@
       <button id="cancel" class="quiet" hidden>Cancel</button>
     </div>
     <div class="tiles" id="tiles"></div>
-    <p class="soft small center">Tap a word to teach it again</p>
     <ol id="recent" class="recent"></ol>
   </section>
 
+
+    </div>
+    <aside class="side">
+  <label class="to-app" id="to-app-row">
+    <input type="checkbox" id="to-app" role="switch">
+    <span><b>Send to the guardian app</b> <span id="app-state" class="soft small"></span></span>
+  </label>
   <section id="waves" hidden>
     <canvas id="picture" width="720" height="160"></canvas>
     <p class="soft small center" id="wave-state">Live motion</p>
   </section>
-
   <details id="more">
     <summary>Details</summary>
     <div class="pretend-only" hidden>
@@ -102,6 +105,8 @@
       <button id="reset" class="quiet">Forget all gestures</button>
     </p>
   </details>
+    </aside>
+  </div>
 </main>
 <script type="module" src="app.js"></script>
 </body>

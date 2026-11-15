@@ -15,6 +15,7 @@ import {
 } from './gestures.js';
 import { PRETEND, PRETEND_TAP } from './pretend-motions.js';
 import { Recorder } from './recorder.js';
+import { icon } from './icons.js';
 
 const BAND = 44;                  // the team's band, Vexo-HACK-44. The only place the number is written.
 const EXAMPLES = 3;               // tries per word while teaching
@@ -45,7 +46,7 @@ function showAppSwitch() {
   const on = $('#to-app').checked;
   $('#to-app-row').classList.toggle('on', on);
   $('#app-state').textContent = !appHosts.length ? 'Start the server with --forward to use this'
-    : on ? `On, words go to ${appHosts.join(', ')}` : 'Off, words stay on this laptop';
+    : on ? appHosts.join(', ') : '';
 }
 $('#to-app').disabled = !appHosts.length;
 try { $('#to-app').checked = appHosts.length > 0 && localStorage.getItem(APP_STORE) === 'on'; } catch { /* private window */ }
@@ -278,7 +279,7 @@ function beginWord() {
 function drawTeach() {
   const w = word(teaching.queue[teaching.i]);
   $('#teach-step').textContent = teaching.queue.length > 1 ? `Word ${teaching.i + 1} of ${teaching.queue.length}` : 'Teach again';
-  $('#teach-icon').textContent = w.icon;
+  $('#teach-icon').replaceChildren(icon(w.id, 40));
   $('#teach-title').textContent = w.label;
   dots($('#teach-dots'), EXAMPLES, teaching.tries.length);
 }
@@ -397,26 +398,26 @@ function nextWord() {
   if (teaching.i < teaching.queue.length) return beginWord();
   teaching = null;
   light(null);
-  use(IDS.every(isTaught) ? 'All five words are taught' : undefined);
+  use();
 }
 $('#teach-redo').onclick = () => teaching && beginWord();
 $('#teach-skip').onclick = () => nextWord();
 
 // --- 3. use ---------------------------------------------------------------------------------------
-const READY = { icon: '', title: 'Ready', hint: 'Make a gesture' };
+const READY = { icon: '', title: 'Ready', hint: '' };
 function use(hint = READY.hint) {
   view('use');
   card({ ...READY, hint });
   tiles();
 }
 /** The big card. `colour` colours its border; `bar` runs the cancel countdown. */
-function card({ icon, title, hint = '', colour = '', state = '', bar = false, back = 0 }) {
+function card({ icon: id = null, title, hint = '', colour = '', state = '', bar = false, back = 0 }) {
   clearTimeout(cardTimer);
-  $('#card-icon').textContent = icon;
+  $('#card-icon').replaceChildren(...(id ? [icon(id, 48)] : []));
   $('#card-title').textContent = title;
   $('#card-hint').textContent = hint;
   $('#card').className = `word-card ${state}`;
-  $('#card').style.setProperty('--word', colour || 'var(--line)');
+  $('#card').style.setProperty('--word', colour || 'var(--border)');
   $('#bar').hidden = !bar;
   $('#cancel').hidden = !bar;
   if (bar) {
@@ -436,11 +437,9 @@ function tiles(active = null) {
     const b = document.createElement('button');
     b.className = `tile${isTaught(w.id) ? '' : ' untaught'}`;
     if (active === w.id) b.style.borderColor = w.colour;
-    const icon = document.createElement('b');
-    icon.textContent = w.icon;
     const how = document.createElement('small');
     how.textContent = describe(w.id);
-    b.append(w.label, how);
+    b.append(icon(w.id, 22), w.label, how);
     b.title = `Teach ${w.label} again`;
     b.onclick = () => band && teach([w.id]);
     b.disabled = !band;
@@ -458,7 +457,7 @@ function useGesture(shape) {
   lastEvent = rec.event({ kind: 'movement', word: got.id, reason: got.reason ?? null, confidence: got.id ? confidenceOf(got) : null, ranked: got.ranked.slice(0, 3) }, lastSpan);
   if (got.id) return propose(got.id, shape, 'gesture', confidenceOf(got));   // the app holds back below 0.8
   if (got.reason === 'none') return;
-  card({ icon: '', title: 'Not recognised', hint: 'Pause, then try again', state: 'unsure', back: 2500 });
+  card({ icon: '', title: 'Not recognised', hint: '', state: 'unsure', back: 2500 });
   light(null);
 }
 function useTaps(n, times = []) {
@@ -468,13 +467,13 @@ function useTaps(n, times = []) {
   log(`${n} tap${n > 1 ? 's' : ''} -> ${id ?? (n === 3 && $('#tap-help').checked ? 'help (built in)' : 'no word')}`);
   if (id) return propose(id, null, 'taps', 1);            // a tap count is exact
   if (n === 3 && $('#tap-help').checked) return send('help', 'taps', null, 1);
-  card({ icon: '', title: `${n} tap${n > 1 ? 's' : ''}`, hint: 'No word uses this many taps', state: 'unsure', back: 2500 });
+  card({ icon: '', title: `${n} tap${n > 1 ? 's' : ''}`, hint: 'No word for this', state: 'unsure', back: 2500 });
 }
 function propose(id, shape, via, confidence) {
   const w = word(id);
   pending = { id, shape, via, taps: [], timer: setTimeout(() => { const p = pending; pending = null; send(p.id, p.via, p.shape, confidence); }, CONFIRM_MS) };
   sequence.reset();
-  card({ icon: '', title: w.label, hint: 'Tap twice to cancel', colour: w.colour, bar: true });
+  card({ icon: id, title: w.label, hint: 'Tap twice to cancel', colour: w.colour, bar: true });
   tiles(id);
   light(w.colour, { pattern: 'solid' });
 }
@@ -504,9 +503,9 @@ async function send(id, via, shape = null, confidence = null) {
     const failed = out.filter((f) => !f.ok);
     rec.event({ kind: 'sent', of: lastEvent, word: id, via, confidence, forwarded: out });
     log(`SENT ${id} (${via}${confidence === null ? '' : `, confidence ${confidence.toFixed(2)}`})${out.map((f) => `  ${f.ok ? '→' : '✗'} ${f.to}${f.ok ? '' : ` (${f.error ?? f.status})`}`).join('')}`);
-    const where = !out.length ? 'Kept on this laptop'
-      : failed.length ? `Couldn’t reach the guardian app: ${failed[0].error ?? failed[0].status}` : 'Delivered to the guardian app';
-    card({ icon: '', title: w.label, hint: where, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
+    const where = !out.length ? ''
+      : failed.length ? `Couldn’t reach the app: ${failed[0].error ?? failed[0].status}` : 'Delivered';
+    card({ icon: id, title: w.label, hint: where, colour: w.colour, state: failed.length ? 'unsure' : 'sent', back: failed.length ? 5000 : 3000 });
     light(failed.length ? '#ff9f0a' : '#00ff00', { pattern: 'flash', period: 300 }, 1500);
     recent(w.label);
     if (shape && $('#learn').checked) keep(id, shape);

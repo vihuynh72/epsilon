@@ -49,7 +49,7 @@
 * { box-sizing: border-box; }
 html { -webkit-font-smoothing: antialiased; }
 body { margin: 0; background: var(--canvas); color: var(--text-primary); font: 400 var(--text-body)/22px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing: -0.005em; }
-main { max-width: 540px; margin: 0 auto; padding: 24px 16px 64px; }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
 [hidden] { display: none !important; }
 p { margin: 0; }
 
@@ -78,7 +78,9 @@ h2 { font-size: var(--text-2xl); line-height: 32px; font-weight: 600; letter-spa
 
 .view { text-align: center; padding: var(--gap-group) 0 0; animation: appear 200ms var(--ease); }
 @keyframes appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.hero { display: none; }
+.hero { display: flex; justify-content: center; color: var(--text-primary); min-height: 0; }
+.hero:empty { display: none; }
+#teach-icon { margin-bottom: var(--gap-group); color: var(--text-secondary); }
 .step { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--gap-row); }
 .view > .soft { margin-top: var(--gap-row); }
 
@@ -133,3 +135,24 @@ details input[type="number"] { font: inherit; width: 4.5em; padding: 4px 8px; bo
 details code { font-size: 12px; word-break: break-all; }
 pre { max-height: 240px; overflow: auto; font-size: 12px; line-height: 18px; background: var(--bg-surface); padding: 12px; border-radius: var(--radius-sm); white-space: pre-wrap; }
 #light { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #000; }
+
+/* Every screen sits in one card, like the word */
+#connect-view, #calib-view, #teach-view { background: var(--card); border-radius: var(--radius-2xl); box-shadow: var(--shadow); border: 1px solid var(--border-subtle); padding: 40px 24px; }
+#connect-view button.primary { margin-top: var(--gap-group); }
+.to-app #app-state:empty { display: none; }
+#card-hint:empty { display: none; }
+#teach-note:empty, #calib-hint:empty { visibility: hidden; }
+
+/* Two columns on a laptop: the card and the words on the left, the switch, motion and details on the right */
+.layout { display: grid; gap: var(--gap-section); }
+@media (min-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+  .side { position: sticky; top: 24px; }
+  .primary .view, .primary .word-card { min-height: 380px; }
+}
+.side .to-app { margin-bottom: var(--gap-group); }
+.side #waves { margin-top: 0; }
+.tile svg { color: var(--text-secondary); margin-bottom: 4px; }
+.tile.untaught svg { color: var(--text-faint); }
+#card-icon svg { color: var(--word); }
+.word-card.unsure #card-icon svg, .word-card:not([style*="--word"]) #card-icon svg { color: var(--text-secondary); }
